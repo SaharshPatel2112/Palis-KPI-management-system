@@ -1,4 +1,4 @@
-# KPI Management System — Phase 1 scaffold
+# KPI Management System 
 
 Sign-in via Clerk, a Postgres schema (via Prisma) covering all 6 departments
 generically, and a dashboard pulling real target-vs-achieved numbers per
