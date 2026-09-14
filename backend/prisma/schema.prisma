@@ -1,0 +1,61 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Department {
+  id        Int         @id @default(autoincrement())
+  name      String      @unique
+  metrics   KpiMetric[]
+  employees Employee[]
+  createdAt DateTime    @default(now())
+}
+
+enum Role {
+  ADMIN
+  HR
+  MANAGER
+  EMPLOYEE
+}
+
+model Employee {
+  id           Int         @id @default(autoincrement())
+  clerkUserId  String      @unique
+  name         String
+  email        String      @unique
+  role         Role        @default(EMPLOYEE)
+  department   Department? @relation(fields: [departmentId], references: [id])
+  departmentId Int?
+  entries      KpiEntry[]
+  createdAt    DateTime    @default(now())
+}
+
+model KpiMetric {
+  id           Int         @id @default(autoincrement())
+  name         String
+  unit         String?
+  department   Department  @relation(fields: [departmentId], references: [id])
+  departmentId Int
+  entries      KpiEntry[]
+
+  @@unique([name, departmentId])
+}
+
+model KpiEntry {
+  id         Int       @id @default(autoincrement())
+  employee   Employee  @relation(fields: [employeeId], references: [id])
+  employeeId Int
+  metric     KpiMetric @relation(fields: [metricId], references: [id])
+  metricId   Int
+  period     String
+  target     Float
+  achieved   Float
+  remarks    String?
+  createdAt  DateTime  @default(now())
+
+  @@unique([employeeId, metricId, period])
+}
