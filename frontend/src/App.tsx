@@ -1,13 +1,19 @@
-import { useEffect } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
-import { SignedIn, SignedOut, RedirectToSignIn, useAuth } from '@clerk/clerk-react';
-import Home from './pages/Home';
-import Dashboard from './pages/Dashboard';
-import TeamPage from './pages/TeamPage';
-import SalesEntryPage from './pages/SalesEntryPage';
-import SignInPage from './pages/SignInPage';
-import SignUpPage from './pages/SignUpPage';
-import { attachAuthToken } from './api/client';
+import { useEffect } from "react";
+import { Routes, Route, Navigate } from "react-router-dom";
+import {
+  SignedIn,
+  SignedOut,
+  RedirectToSignIn,
+  useAuth,
+} from "@clerk/clerk-react";
+import Home from "./pages/Home";
+import Dashboard from "./pages/Dashboard";
+import TeamPage from "./pages/TeamPage";
+import SalesEntryPage from "./pages/SalesEntryPage";
+import MyKpisPage from "./pages/MyKpisPage";
+import SignInPage from "./pages/SignInPage";
+import SignUpPage from "./pages/SignUpPage";
+import { attachAuthToken } from "./api/client";
 
 export default function App() {
   const { getToken } = useAuth();
@@ -51,6 +57,19 @@ export default function App() {
           <>
             <SignedIn>
               <Dashboard />
+            </SignedIn>
+            <SignedOut>
+              <RedirectToSignIn />
+            </SignedOut>
+          </>
+        }
+      />
+      <Route
+        path="/my-kpis"
+        element={
+          <>
+            <SignedIn>
+              <MyKpisPage />
             </SignedIn>
             <SignedOut>
               <RedirectToSignIn />

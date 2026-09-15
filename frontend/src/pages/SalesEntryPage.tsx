@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Link, Navigate } from 'react-router-dom';
-import { client } from '../api/client';
-import { useEmployee } from '../hooks/useEmployee';
+import { useEffect, useMemo, useState } from "react";
+import { Link, Navigate } from "react-router-dom";
+import { client } from "../api/client";
+import AppHeader from "../components/AppHeader";
+import { useEmployee } from "../hooks/useEmployee";
 
 type Metric = { id: number; name: string; unit: string | null };
 type Dept = { id: number; name: string; metrics: Metric[] };
@@ -13,11 +14,12 @@ type Entry = {
   period: string;
   target: number;
   achieved: number;
+  remarks: string | null;
 };
 
 function currentPeriod() {
   const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
 export default function SalesEntryPage() {
@@ -33,12 +35,14 @@ export default function SalesEntryPage() {
     async function load() {
       try {
         const [deptRes, empRes] = await Promise.all([
-          client.get<Dept[]>('/kpi/departments'),
-          client.get<EmployeeRow[]>('/employees'),
+          client.get<Dept[]>("/kpi/departments"),
+          client.get<EmployeeRow[]>("/employees"),
         ]);
-        const sales = deptRes.data.find((d) => d.name === 'Sales') ?? null;
+        const sales = deptRes.data.find((d) => d.name === "Sales") ?? null;
         setDepartment(sales);
-        setEmployees(sales ? empRes.data.filter((e) => e.departmentId === sales.id) : []);
+        setEmployees(
+          sales ? empRes.data.filter((e) => e.departmentId === sales.id) : [],
+        );
       } finally {
         setLoading(false);
       }
@@ -49,7 +53,7 @@ export default function SalesEntryPage() {
   useEffect(() => {
     async function loadEntries() {
       if (!department) return;
-      const { data } = await client.get<Entry[]>('/kpi/entries', {
+      const { data } = await client.get<Entry[]>("/kpi/entries", {
         params: { departmentId: department.id, period },
       });
       setEntries(data);
@@ -63,19 +67,28 @@ export default function SalesEntryPage() {
     return map;
   }, [entries]);
 
-  async function saveEntry(employeeId: number, metricId: number, target: number, achieved: number) {
+  async function saveEntry(
+    employeeId: number,
+    metricId: number,
+    target: number,
+    achieved: number,
+    remarks: string,
+  ) {
     const key = `${employeeId}-${metricId}`;
     setSavingKey(key);
     try {
-      const { data } = await client.post<Entry>('/kpi/entry', {
+      const { data } = await client.post<Entry>("/kpi/entry", {
         employeeId,
         metricId,
         period,
         target,
         achieved,
+        remarks: remarks || undefined,
       });
       setEntries((prev) => {
-        const rest = prev.filter((e) => !(e.employeeId === employeeId && e.metricId === metricId));
+        const rest = prev.filter(
+          (e) => !(e.employeeId === employeeId && e.metricId === metricId),
+        );
         return [...rest, data];
       });
     } finally {
@@ -83,74 +96,98 @@ export default function SalesEntryPage() {
     }
   }
 
-  if (!meLoading && employee && !['ADMIN', 'HR', 'MANAGER'].includes(employee.role)) {
+  if (
+    !meLoading &&
+    employee &&
+    !["ADMIN", "HR", "MANAGER"].includes(employee.role)
+  ) {
     return <Navigate to="/dashboard" replace />;
   }
 
   return (
-    <div className="min-h-screen bg-white p-8">
-      <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold text-ink">Sales — Log KPIs</h1>
-          <p className="text-sm text-muted mt-1">Enter target and achieved per employee, per metric.</p>
+    <div className="min-h-screen bg-white">
+      <AppHeader />
+      <div className="p-8">
+        <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
+          <div>
+            <h1 className="text-2xl font-semibold text-ink">
+              Sales — Log KPIs
+            </h1>
+            <p className="text-sm text-muted mt-1">
+              Enter target, achieved, and an optional remark per employee.
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            <input
+              type="month"
+              value={period}
+              onChange={(e) => setPeriod(e.target.value)}
+              className="border border-line rounded-md px-3 py-2 text-sm"
+            />
+            <Link
+              to="/dashboard"
+              className="text-sm font-medium text-primary hover:text-deep"
+            >
+              Back to dashboard
+            </Link>
+          </div>
         </div>
-        <div className="flex items-center gap-3">
-          <input
-            type="month"
-            value={period}
-            onChange={(e) => setPeriod(e.target.value)}
-            className="border border-line rounded-md px-3 py-2 text-sm"
-          />
-          <Link to="/dashboard" className="text-sm font-medium text-primary">
-            Back to dashboard
-          </Link>
-        </div>
-      </div>
 
-      {loading || !department ? (
-        <p className="text-muted">Loading…</p>
-      ) : employees.length === 0 ? (
-        <p className="text-muted">
-          No employees are assigned to Sales yet — assign someone from{' '}
-          <Link to="/team" className="text-primary font-medium">
-            Team
-          </Link>
-          .
-        </p>
-      ) : (
-        <div className="border border-line rounded-lg overflow-hidden overflow-x-auto">
-          <table className="w-full text-sm min-w-[720px]">
-            <thead className="bg-panel text-left text-muted">
-              <tr>
-                <th className="px-4 py-3 font-medium">Employee</th>
-                <th className="px-4 py-3 font-medium">Metric</th>
-                <th className="px-4 py-3 font-medium w-28">Target</th>
-                <th className="px-4 py-3 font-medium w-28">Achieved</th>
-                <th className="px-4 py-3 font-medium w-20" />
-              </tr>
-            </thead>
-            <tbody>
-              {employees.map((emp) =>
-                department.metrics.map((metric) => {
-                  const key = `${emp.id}-${metric.id}`;
-                  const existing = entryFor.get(key);
-                  return (
-                    <EntryRow
-                      key={key}
-                      employeeName={emp.name}
-                      metricName={metric.name}
-                      initialTarget={existing?.target ?? 0}
-                      initialAchieved={existing?.achieved ?? 0}
-                      saving={savingKey === key}
-                      onSave={(target, achieved) => saveEntry(emp.id, metric.id, target, achieved)}
-                    />
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-      )}
+        {loading || !department ? (
+          <p className="text-muted">Loading…</p>
+        ) : employees.length === 0 ? (
+          <p className="text-muted">
+            No employees are assigned to Sales yet — assign someone from{" "}
+            <Link to="/team" className="text-primary font-medium">
+              Team
+            </Link>
+            .
+          </p>
+        ) : (
+          <div className="border border-line rounded-lg overflow-hidden overflow-x-auto">
+            <table className="w-full text-sm min-w-[920px]">
+              <thead className="bg-panel text-left text-muted">
+                <tr>
+                  <th className="px-4 py-3 font-medium">Employee</th>
+                  <th className="px-4 py-3 font-medium">Metric</th>
+                  <th className="px-4 py-3 font-medium w-24">Target</th>
+                  <th className="px-4 py-3 font-medium w-24">Achieved</th>
+                  <th className="px-4 py-3 font-medium">Remarks</th>
+                  <th className="px-4 py-3 font-medium w-20" />
+                </tr>
+              </thead>
+              <tbody>
+                {employees.map((emp) =>
+                  department.metrics.map((metric) => {
+                    const key = `${emp.id}-${metric.id}`;
+                    const existing = entryFor.get(key);
+                    return (
+                      <EntryRow
+                        key={key}
+                        employeeName={emp.name}
+                        metricName={metric.name}
+                        initialTarget={existing?.target ?? 0}
+                        initialAchieved={existing?.achieved ?? 0}
+                        initialRemarks={existing?.remarks ?? ""}
+                        saving={savingKey === key}
+                        onSave={(target, achieved, remarks) =>
+                          saveEntry(
+                            emp.id,
+                            metric.id,
+                            target,
+                            achieved,
+                            remarks,
+                          )
+                        }
+                      />
+                    );
+                  }),
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -160,6 +197,7 @@ function EntryRow({
   metricName,
   initialTarget,
   initialAchieved,
+  initialRemarks,
   saving,
   onSave,
 }: {
@@ -167,22 +205,24 @@ function EntryRow({
   metricName: string;
   initialTarget: number;
   initialAchieved: number;
+  initialRemarks: string;
   saving: boolean;
-  onSave: (target: number, achieved: number) => void;
+  onSave: (target: number, achieved: number, remarks: string) => void;
 }) {
   const [target, setTarget] = useState(initialTarget);
   const [achieved, setAchieved] = useState(initialAchieved);
+  const [remarks, setRemarks] = useState(initialRemarks);
 
   return (
-    <tr className="border-t border-line">
-      <td className="px-4 py-2.5 text-ink">{employeeName}</td>
-      <td className="px-4 py-2.5 text-muted">{metricName}</td>
+    <tr className="border-t border-line align-top">
+      <td className="px-4 py-2.5 text-ink whitespace-nowrap">{employeeName}</td>
+      <td className="px-4 py-2.5 text-muted whitespace-nowrap">{metricName}</td>
       <td className="px-4 py-2.5">
         <input
           type="number"
           value={target}
           onChange={(e) => setTarget(Number(e.target.value))}
-          className="w-24 border border-line rounded-md px-2 py-1.5"
+          className="w-20 border border-line rounded-md px-2 py-1.5"
         />
       </td>
       <td className="px-4 py-2.5">
@@ -190,16 +230,25 @@ function EntryRow({
           type="number"
           value={achieved}
           onChange={(e) => setAchieved(Number(e.target.value))}
-          className="w-24 border border-line rounded-md px-2 py-1.5"
+          className="w-20 border border-line rounded-md px-2 py-1.5"
+        />
+      </td>
+      <td className="px-4 py-2.5">
+        <input
+          type="text"
+          value={remarks}
+          onChange={(e) => setRemarks(e.target.value)}
+          placeholder="Optional note for the employee"
+          className="w-full min-w-[220px] border border-line rounded-md px-2 py-1.5"
         />
       </td>
       <td className="px-4 py-2.5">
         <button
-          onClick={() => onSave(target, achieved)}
+          onClick={() => onSave(target, achieved, remarks)}
           disabled={saving}
           className="px-3 py-1.5 rounded-md bg-primary text-white text-xs font-semibold hover:bg-deep disabled:opacity-60"
         >
-          {saving ? 'Saving…' : 'Save'}
+          {saving ? "Saving…" : "Save"}
         </button>
       </td>
     </tr>
