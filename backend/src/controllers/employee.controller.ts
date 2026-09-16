@@ -1,60 +1,129 @@
-import type { Request, Response } from 'express';
-import { getAuth } from '@clerk/express';
-import { prisma } from '../config/prisma.js';
+import type { Request, Response } from "express";
+import { getAuth } from "@clerk/express";
+import type { Role } from "@prisma/client";
+import { prisma } from "../config/prisma.js";
 
 export async function syncEmployee(req: Request, res: Response) {
   try {
     const { userId: clerkUserId } = getAuth(req);
-    if (!clerkUserId) return res.status(401).json({ message: 'Not authenticated' });
+    if (!clerkUserId)
+      return res.status(401).json({ message: "Not authenticated" });
 
     const { name, email } = req.body as { name?: string; email?: string };
-    if (!email) return res.status(400).json({ message: 'email is required' });
+    if (!email) return res.status(400).json({ message: "email is required" });
 
     const employee = await prisma.employee.upsert({
       where: { clerkUserId },
       update: { name: name ?? undefined, email },
-      create: { clerkUserId, name: name ?? email, email, role: 'EMPLOYEE' },
+      create: { clerkUserId, name: name ?? email, email, role: "EMPLOYEE" },
     });
 
     res.json(employee);
   } catch (err) {
-    console.error('syncEmployee error:', err);
-    res.status(500).json({ message: 'Server error' });
+    console.error("syncEmployee error:", err);
+    res.status(500).json({ message: "Server error" });
   }
 }
 
-// Returns the signed-in user's own employee record — role, department, etc.
-// The frontend uses this to decide what nav links / pages to show.
 export async function getMe(req: Request, res: Response) {
   try {
-    if (!req.employee) return res.status(403).json({ message: 'No employee profile' });
+    if (!req.employee)
+      return res.status(403).json({ message: "No employee profile" });
     res.json(req.employee);
   } catch (err) {
-    console.error('getMe error:', err);
-    res.status(500).json({ message: 'Server error' });
+    console.error("getMe error:", err);
+    res.status(500).json({ message: "Server error" });
   }
 }
 
-// ADMIN and HR see everyone. MANAGER sees only their own department.
 export async function listEmployees(req: Request, res: Response) {
   try {
-    if (!req.employee) return res.status(403).json({ message: 'No employee profile' });
-
+    if (!req.employee)
+      return res.status(403).json({ message: "No employee profile" });
     const employees = await prisma.employee.findMany({
-      where: req.employee.role === 'MANAGER' ? { departmentId: req.employee.departmentId } : undefined,
       include: { department: true },
     });
     res.json(employees);
   } catch (err) {
-    console.error('listEmployees error:', err);
-    res.status(500).json({ message: 'Server error' });
+    console.error("listEmployees error:", err);
+    res.status(500).json({ message: "Server error" });
   }
 }
 
+// Who can assign which role. ADMIN is unrestricted; MANAGER can grant HR or
+// EMPLOYEE (not ADMIN, not MANAGER); HR can only grant EMPLOYEE.
+const ASSIGNABLE_ROLES: Record<string, string[]> = {
+  ADMIN: ["ADMIN", "HR", "MANAGER", "EMPLOYEE"],
+  MANAGER: ["HR", "EMPLOYEE"],
+  HR: ["EMPLOYEE"],
+};
+
+// HR is walled off from these departments entirely, and from Admin/Manager
+// accounts entirely — can't view-edit either field on those rows, not just
+// restricted in what value to set.
+const HR_RESTRICTED_DEPARTMENTS = ["HR", "Accounts"];
+const HR_RESTRICTED_ROLES = ["ADMIN", "MANAGER"];
+
 export async function updateEmployee(req: Request, res: Response) {
   try {
+    if (!req.employee)
+      return res.status(403).json({ message: "No employee profile" });
+
     const id = Number(req.params.id);
-    const { role, departmentId } = req.body as { role?: string; departmentId?: number | null };
+    const { role, departmentId } = req.body as {
+      role?: Role;
+      departmentId?: number | null;
+    };
+    const callerRole = req.employee.role;
+
+    if (callerRole === "HR") {
+      const target = await prisma.employee.findUnique({
+        where: { id },
+        include: { department: true },
+      });
+      if (!target)
+        return res.status(404).json({ message: "Employee not found" });
+
+      if (HR_RESTRICTED_ROLES.includes(target.role)) {
+        return res
+          .status(403)
+          .json({ message: "HR cannot modify Admin or Manager accounts" });
+      }
+      if (
+        target.department &&
+        HR_RESTRICTED_DEPARTMENTS.includes(target.department.name)
+      ) {
+        return res
+          .status(403)
+          .json({
+            message: `HR cannot modify employees in ${target.department.name}`,
+          });
+      }
+    }
+
+    if (role !== undefined) {
+      const allowed = ASSIGNABLE_ROLES[callerRole] ?? [];
+      if (!allowed.includes(role)) {
+        return res
+          .status(403)
+          .json({ message: `${callerRole} cannot assign the ${role} role` });
+      }
+    }
+
+    if (
+      departmentId !== undefined &&
+      departmentId !== null &&
+      callerRole === "HR"
+    ) {
+      const dept = await prisma.department.findUnique({
+        where: { id: departmentId },
+      });
+      if (dept && HR_RESTRICTED_DEPARTMENTS.includes(dept.name)) {
+        return res
+          .status(403)
+          .json({ message: `HR cannot assign the ${dept.name} department` });
+      }
+    }
 
     const employee = await prisma.employee.update({
       where: { id },
@@ -62,7 +131,7 @@ export async function updateEmployee(req: Request, res: Response) {
     });
     res.json(employee);
   } catch (err) {
-    console.error('updateEmployee error:', err);
-    res.status(500).json({ message: 'Server error' });
+    console.error("updateEmployee error:", err);
+    res.status(500).json({ message: "Server error" });
   }
 }

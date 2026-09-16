@@ -9,7 +9,8 @@ import {
 import Home from "./pages/Home";
 import Dashboard from "./pages/Dashboard";
 import TeamPage from "./pages/TeamPage";
-import SalesEntryPage from "./pages/SalesEntryPage";
+import DepartmentEntryPage from "./pages/DepartmentEntryPage";
+import ReportsPage from "./pages/ReportsPage";
 import MyKpisPage from "./pages/MyKpisPage";
 import SignInPage from "./pages/SignInPage";
 import SignUpPage from "./pages/SignUpPage";
@@ -78,6 +79,19 @@ export default function App() {
         }
       />
       <Route
+        path="/reports"
+        element={
+          <>
+            <SignedIn>
+              <ReportsPage />
+            </SignedIn>
+            <SignedOut>
+              <RedirectToSignIn />
+            </SignedOut>
+          </>
+        }
+      />
+      <Route
         path="/team"
         element={
           <>
@@ -91,11 +105,11 @@ export default function App() {
         }
       />
       <Route
-        path="/kpi/sales"
+        path="/kpi/:department"
         element={
           <>
             <SignedIn>
-              <SalesEntryPage />
+              <DepartmentEntryPage />
             </SignedIn>
             <SignedOut>
               <RedirectToSignIn />

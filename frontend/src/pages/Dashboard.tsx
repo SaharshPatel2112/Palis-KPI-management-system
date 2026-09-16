@@ -44,7 +44,8 @@ export default function Dashboard() {
 
   const canManage =
     !!employee && ["ADMIN", "HR", "MANAGER"].includes(employee.role);
-  const isAdmin = employee?.role === "ADMIN";
+  const canAccessTeam =
+    !!employee && ["ADMIN", "MANAGER", "HR"].includes(employee.role);
 
   return (
     <div className="min-h-screen bg-white">
@@ -64,10 +65,18 @@ export default function Dashboard() {
                 to="/kpi/sales"
                 className="text-sm font-medium text-primary hover:text-deep"
               >
-                Log Sales KPIs
+                Log KPIs
               </Link>
             )}
-            {isAdmin && (
+            {canManage && (
+              <Link
+                to="/reports"
+                className="text-sm font-medium text-primary hover:text-deep"
+              >
+                Reports
+              </Link>
+            )}
+            {canAccessTeam && (
               <Link
                 to="/team"
                 className="text-sm font-medium text-primary hover:text-deep"

@@ -1,11 +1,13 @@
-import type { Request, Response } from 'express';
-import { prisma } from '../config/prisma.js';
+import type { Request, Response } from "express";
+import { prisma } from "../config/prisma.js";
 
 export async function getDashboardSummary(req: Request, res: Response) {
   try {
-    if (!req.employee) return res.status(403).json({ message: 'No employee profile' });
+    if (!req.employee)
+      return res.status(403).json({ message: "No employee profile" });
 
-    const scopedToOwnDept = req.employee.role === 'MANAGER' || req.employee.role === 'EMPLOYEE';
+    const scopedToOwnDept =
+      req.employee.role === "MANAGER" || req.employee.role === "EMPLOYEE";
     if (scopedToOwnDept && !req.employee.departmentId) {
       return res.json([]);
     }
@@ -26,86 +28,117 @@ export async function getDashboardSummary(req: Request, res: Response) {
       summary.set(deptName, current);
     }
 
-    const result = Array.from(summary.entries()).map(([department, { target, achieved }]) => ({
-      department,
-      target,
-      achieved,
-      achievementPercent: target > 0 ? Math.round((achieved / target) * 100) : 0,
-    }));
+    const result = Array.from(summary.entries()).map(
+      ([department, { target, achieved }]) => ({
+        department,
+        target,
+        achieved,
+        achievementPercent:
+          target > 0 ? Math.round((achieved / target) * 100) : 0,
+      }),
+    );
 
     res.json(result);
   } catch (err) {
-    console.error('getDashboardSummary error:', err);
-    res.status(500).json({ message: 'Server error' });
+    console.error("getDashboardSummary error:", err);
+    res.status(500).json({ message: "Server error" });
   }
 }
 
 export async function getMyKpis(req: Request, res: Response) {
   try {
-    if (!req.employee) return res.status(403).json({ message: 'No employee profile' });
+    if (!req.employee)
+      return res.status(403).json({ message: "No employee profile" });
 
     const entries = await prisma.kpiEntry.findMany({
       where: { employeeId: req.employee.id },
       include: { metric: true },
-      orderBy: { period: 'desc' },
+      orderBy: { period: "desc" },
     });
     res.json(entries);
   } catch (err) {
-    console.error('getMyKpis error:', err);
-    res.status(500).json({ message: 'Server error' });
+    console.error("getMyKpis error:", err);
+    res.status(500).json({ message: "Server error" });
   }
 }
 
-// List KPI entries for a department + period, so the entry screen can show
-// existing values. ADMIN/HR can pass any departmentId; MANAGER is always
-// locked to their own department, regardless of what's passed in.
+// List KPI entries for filtering/reporting. ADMIN/HR can pass any
+// departmentId (or none, for "all departments"); MANAGER is always locked
+// to their own department regardless of what's passed in. Supports either
+// a single `period` (used by the entry screen) or a `from`/`to` range
+// (used by the reports page) — periods are "YYYY-MM" strings, which sort
+// correctly with plain string comparison.
 export async function listKpiEntries(req: Request, res: Response) {
   try {
-    if (!req.employee) return res.status(403).json({ message: 'No employee profile' });
+    if (!req.employee)
+      return res.status(403).json({ message: "No employee profile" });
 
-    const { departmentId, period } = req.query as { departmentId?: string; period?: string };
+    const { departmentId, period, from, to, employeeId } = req.query as {
+      departmentId?: string;
+      period?: string;
+      from?: string;
+      to?: string;
+      employeeId?: string;
+    };
 
-    const scopedToOwnDept = req.employee.role === 'MANAGER';
+    const scopedToOwnDept = req.employee.role === "MANAGER";
     const effectiveDepartmentId = scopedToOwnDept
       ? req.employee.departmentId
       : departmentId
-      ? Number(departmentId)
-      : undefined;
+        ? Number(departmentId)
+        : undefined;
 
     if (scopedToOwnDept && !effectiveDepartmentId) return res.json([]);
 
+    const periodFilter: { equals?: string; gte?: string; lte?: string } = {};
+    if (period) periodFilter.equals = period;
+    if (from) periodFilter.gte = from;
+    if (to) periodFilter.lte = to;
+
     const entries = await prisma.kpiEntry.findMany({
       where: {
-        ...(effectiveDepartmentId ? { metric: { departmentId: effectiveDepartmentId } } : {}),
-        ...(period ? { period } : {}),
+        ...(effectiveDepartmentId
+          ? { metric: { departmentId: effectiveDepartmentId } }
+          : {}),
+        ...(Object.keys(periodFilter).length ? { period: periodFilter } : {}),
+        ...(employeeId ? { employeeId: Number(employeeId) } : {}),
       },
-      include: { employee: true, metric: true },
-      orderBy: [{ employeeId: 'asc' }, { metricId: 'asc' }],
+      include: { employee: true, metric: { include: { department: true } } },
+      orderBy: [{ period: "desc" }, { employeeId: "asc" }, { metricId: "asc" }],
     });
     res.json(entries);
   } catch (err) {
-    console.error('listKpiEntries error:', err);
-    res.status(500).json({ message: 'Server error' });
+    console.error("listKpiEntries error:", err);
+    res.status(500).json({ message: "Server error" });
   }
 }
 
 export async function upsertKpiEntry(req: Request, res: Response) {
   try {
-    if (!req.employee) return res.status(403).json({ message: 'No employee profile' });
+    if (!req.employee)
+      return res.status(403).json({ message: "No employee profile" });
 
-    const { employeeId, metricId, period, target, achieved, remarks } = req.body as {
-      employeeId: number;
-      metricId: number;
-      period: string;
-      target: number;
-      achieved: number;
-      remarks?: string;
-    };
+    const { employeeId, metricId, period, target, achieved, remarks } =
+      req.body as {
+        employeeId: number;
+        metricId: number;
+        period: string;
+        target: number;
+        achieved: number;
+        remarks?: string;
+      };
 
-    if (req.employee.role !== 'ADMIN') {
-      const targetEmployee = await prisma.employee.findUnique({ where: { id: employeeId } });
-      if (!targetEmployee || targetEmployee.departmentId !== req.employee.departmentId) {
-        return res.status(403).json({ message: "Can't log KPIs outside your own department" });
+    if (req.employee.role !== "ADMIN") {
+      const targetEmployee = await prisma.employee.findUnique({
+        where: { id: employeeId },
+      });
+      if (
+        !targetEmployee ||
+        targetEmployee.departmentId !== req.employee.departmentId
+      ) {
+        return res
+          .status(403)
+          .json({ message: "Can't log KPIs outside your own department" });
       }
     }
 
@@ -116,17 +149,19 @@ export async function upsertKpiEntry(req: Request, res: Response) {
     });
     res.json(entry);
   } catch (err) {
-    console.error('upsertKpiEntry error:', err);
-    res.status(500).json({ message: 'Server error' });
+    console.error("upsertKpiEntry error:", err);
+    res.status(500).json({ message: "Server error" });
   }
 }
 
 export async function listDepartments(_req: Request, res: Response) {
   try {
-    const departments = await prisma.department.findMany({ include: { metrics: true } });
+    const departments = await prisma.department.findMany({
+      include: { metrics: true },
+    });
     res.json(departments);
   } catch (err) {
-    console.error('listDepartments error:', err);
-    res.status(500).json({ message: 'Server error' });
+    console.error("listDepartments error:", err);
+    res.status(500).json({ message: "Server error" });
   }
 }
