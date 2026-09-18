@@ -44,8 +44,9 @@ export default function DepartmentEntryPage() {
   const [savingKey, setSavingKey] = useState<string | null>(null);
 
   const isManager = employee?.role === "MANAGER";
+  // Managers can browse every department; only their own is editable.
   const canPickDepartment =
-    !!employee && ["ADMIN", "HR"].includes(employee.role);
+    !!employee && ["ADMIN", "HR", "MANAGER"].includes(employee.role);
 
   useEffect(() => {
     async function load() {
@@ -61,16 +62,20 @@ export default function DepartmentEntryPage() {
 
   const department = useMemo(() => {
     if (allDepartments.length === 0) return null;
-    if (isManager) {
-      return (
-        allDepartments.find((d) => d.id === employee?.departmentId) ?? null
-      );
-    }
     return (
       allDepartments.find((d) => slugify(d.name) === departmentSlug) ??
       allDepartments[0]
     );
-  }, [allDepartments, departmentSlug, isManager, employee]);
+  }, [allDepartments, departmentSlug]);
+
+  // Managers get read-only access to other departments (the backend also
+  // rejects cross-department writes) — their own department stays editable.
+  const readOnly = !!(
+    isManager &&
+    department &&
+    employee &&
+    department.id !== employee.departmentId
+  );
 
   // Keep the URL in sync with whichever department actually resolved —
   // covers landing on a stale/missing slug and a manager's URL always
@@ -121,6 +126,7 @@ export default function DepartmentEntryPage() {
     achieved: number,
     remarks: string,
   ) {
+    if (readOnly) return;
     const key = `${employeeId}-${metricId}`;
     setSavingKey(key);
     try {
@@ -181,6 +187,12 @@ export default function DepartmentEntryPage() {
             <p className="text-sm text-muted mt-1">
               Pick an employee, then enter their numbers for the period.
             </p>
+            {readOnly && (
+              <p className="mt-2 text-xs font-medium text-warn bg-[#FBF3E4] border border-warn/30 rounded-md px-3 py-2 inline-block">
+                Viewing {department?.name} — read-only. You can log KPIs only
+                for your own department.
+              </p>
+            )}
           </div>
           <div className="flex items-center gap-3 flex-wrap">
             {canPickDepartment && (
@@ -263,6 +275,7 @@ export default function DepartmentEntryPage() {
                       initialAchieved={existing?.achieved ?? 0}
                       initialRemarks={existing?.remarks ?? ""}
                       saving={savingKey === key}
+                      readOnly={readOnly}
                       onSave={(target, achieved, remarks) =>
                         saveEntry(
                           selectedEmployee.id,
@@ -290,6 +303,7 @@ function EntryRow({
   initialAchieved,
   initialRemarks,
   saving,
+  readOnly,
   onSave,
 }: {
   metricName: string;
@@ -297,6 +311,7 @@ function EntryRow({
   initialAchieved: number;
   initialRemarks: string;
   saving: boolean;
+  readOnly: boolean;
   onSave: (target: number, achieved: number, remarks: string) => void;
 }) {
   const [target, setTarget] = useState(initialTarget);
@@ -317,7 +332,8 @@ function EntryRow({
           type="number"
           value={target}
           onChange={(e) => setTarget(Number(e.target.value))}
-          className="w-20 border border-line rounded-md px-2 py-1.5"
+          disabled={readOnly}
+          className="w-20 border border-line rounded-md px-2 py-1.5 disabled:bg-panel disabled:text-muted"
         />
       </td>
       <td className="px-4 py-2.5">
@@ -325,7 +341,8 @@ function EntryRow({
           type="number"
           value={achieved}
           onChange={(e) => setAchieved(Number(e.target.value))}
-          className="w-20 border border-line rounded-md px-2 py-1.5"
+          disabled={readOnly}
+          className="w-20 border border-line rounded-md px-2 py-1.5 disabled:bg-panel disabled:text-muted"
         />
       </td>
       <td className="px-4 py-2.5">
@@ -334,17 +351,20 @@ function EntryRow({
           value={remarks}
           onChange={(e) => setRemarks(e.target.value)}
           placeholder="Optional note for the employee"
-          className="w-full border border-line rounded-md px-2 py-1.5"
+          disabled={readOnly}
+          className="w-full border border-line rounded-md px-2 py-1.5 disabled:bg-panel disabled:text-muted"
         />
       </td>
       <td className="px-4 py-2.5">
-        <button
-          onClick={() => onSave(target, achieved, remarks)}
-          disabled={saving}
-          className="px-3 py-1.5 rounded-md bg-primary text-white text-xs font-semibold hover:bg-deep disabled:opacity-60"
-        >
-          {saving ? "Saving…" : "Save"}
-        </button>
+        {!readOnly && (
+          <button
+            onClick={() => onSave(target, achieved, remarks)}
+            disabled={saving}
+            className="px-3 py-1.5 rounded-md bg-primary text-white text-xs font-semibold hover:bg-deep disabled:opacity-60"
+          >
+            {saving ? "Saving…" : "Save"}
+          </button>
+        )}
       </td>
     </tr>
   );

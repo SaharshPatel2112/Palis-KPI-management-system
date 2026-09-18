@@ -124,7 +124,8 @@ export default function ReportsPage() {
           <div>
             <h1 className="text-2xl font-semibold text-ink">Reports</h1>
             <p className="text-sm text-muted mt-1">
-              Filter by department and date range, then export.
+              Filter by department and date range, then export. Managers can
+              review every department; only their own is editable.
             </p>
           </div>
           <Link
@@ -140,11 +141,10 @@ export default function ReportsPage() {
             <label className="block text-xs text-muted mb-1">Department</label>
             <select
               value={departmentId}
-              disabled={isManager}
               onChange={(e) =>
                 setDepartmentId(e.target.value ? Number(e.target.value) : "")
               }
-              className="border border-line rounded-md px-3 py-2 text-sm bg-white min-w-[160px] disabled:opacity-60"
+              className="border border-line rounded-md px-3 py-2 text-sm bg-white min-w-[160px]"
             >
               <option value="">All departments</option>
               {departments.map((d) => (

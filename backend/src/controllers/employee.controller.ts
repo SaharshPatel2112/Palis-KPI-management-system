@@ -1,7 +1,17 @@
 import type { Request, Response } from "express";
 import { getAuth } from "@clerk/express";
-import type { Role } from "@prisma/client";
+import { z } from "zod";
 import { prisma } from "../config/prisma.js";
+
+const syncEmployeeSchema = z.object({
+  name: z.string().min(1).max(200).optional(),
+  email: z.string().email(),
+});
+
+const updateEmployeeSchema = z.object({
+  role: z.enum(["ADMIN", "HR", "MANAGER", "EMPLOYEE"]).optional(),
+  departmentId: z.number().int().positive().nullable().optional(),
+});
 
 export async function syncEmployee(req: Request, res: Response) {
   try {
@@ -9,8 +19,13 @@ export async function syncEmployee(req: Request, res: Response) {
     if (!clerkUserId)
       return res.status(401).json({ message: "Not authenticated" });
 
-    const { name, email } = req.body as { name?: string; email?: string };
-    if (!email) return res.status(400).json({ message: "email is required" });
+    const parsed = syncEmployeeSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res
+        .status(400)
+        .json({ message: "Invalid request", issues: parsed.error.issues });
+    }
+    const { name, email } = parsed.data;
 
     const employee = await prisma.employee.upsert({
       where: { clerkUserId },
@@ -70,10 +85,13 @@ export async function updateEmployee(req: Request, res: Response) {
       return res.status(403).json({ message: "No employee profile" });
 
     const id = Number(req.params.id);
-    const { role, departmentId } = req.body as {
-      role?: Role;
-      departmentId?: number | null;
-    };
+    const parsed = updateEmployeeSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res
+        .status(400)
+        .json({ message: "Invalid request", issues: parsed.error.issues });
+    }
+    const { role, departmentId } = parsed.data;
     const callerRole = req.employee.role;
 
     if (callerRole === "HR") {

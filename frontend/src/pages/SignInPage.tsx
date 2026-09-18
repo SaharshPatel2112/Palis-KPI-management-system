@@ -1,4 +1,4 @@
-import { SignIn } from '@clerk/clerk-react';
+import { SignIn } from "@clerk/clerk-react";
 
 export default function SignInPage() {
   return (
@@ -13,7 +13,9 @@ export default function SignInPage() {
           </div>
           <div className="leading-tight">
             <p className="font-bold text-sm">PALIS KPI MANAGEMENT SYSTEM</p>
-            <p className="font-mono text-[11px] tracking-wider text-white/65">PALIS ECO VEHICLES</p>
+            <p className="font-mono text-[11px] tracking-wider text-white/65">
+              PALIS ECO VEHICLES
+            </p>
           </div>
         </div>
         <div className="relative z-10 max-w-md">
@@ -21,8 +23,8 @@ export default function SignInPage() {
             Track performance across every department, in one place.
           </h1>
           <p className="text-white/80 text-[15px]">
-            Sales, production, service, purchase, HR, and accounts — targets vs achievements,
-            updated in real time.
+            Sales, production, service, purchase, HR, and accounts — targets vs
+            achievements, updated in real time.
           </p>
         </div>
         <div />
@@ -35,31 +37,34 @@ export default function SignInPage() {
             <div className="bg-primary rounded-lg px-2.5 py-1.5">
               <span className="font-bold text-white text-sm">P</span>
             </div>
-            <p className="font-bold text-sm text-ink">PALIS KPI MANAGEMENT SYSTEM</p>
+            <p className="font-bold text-sm text-ink">
+              PALIS KPI MANAGEMENT SYSTEM
+            </p>
           </div>
 
           <SignIn
-            afterSignInUrl="/"
+            afterSignInUrl="/dashboard"
             signUpUrl="/sign-up"
             appearance={{
               variables: {
-                colorPrimary: '#087D43',
-                colorBackground: '#FFFFFF',
-                colorText: '#171717',
-                colorTextSecondary: '#5B6B63',
-                colorInputBackground: '#FFFFFF',
-                colorInputText: '#171717',
-                borderRadius: '0.5rem',
+                colorPrimary: "#087D43",
+                colorBackground: "#FFFFFF",
+                colorText: "#171717",
+                colorTextSecondary: "#5B6B63",
+                colorInputBackground: "#FFFFFF",
+                colorInputText: "#171717",
+                borderRadius: "0.5rem",
                 fontFamily: '"IBM Plex Sans", sans-serif',
-                spacingUnit: '1.15rem',
+                spacingUnit: "1.15rem",
               },
               elements: {
-                rootBox: 'w-full',
-                card: 'shadow-none border-none w-full',
-                headerTitle: 'text-2xl font-semibold text-ink',
-                headerSubtitle: 'text-muted',
-                formButtonPrimary: 'bg-primary hover:bg-deep text-sm normal-case',
-                footerActionLink: 'text-primary hover:text-deep',
+                rootBox: "w-full",
+                card: "shadow-none border-none w-full",
+                headerTitle: "text-2xl font-semibold text-ink",
+                headerSubtitle: "text-muted",
+                formButtonPrimary:
+                  "bg-primary hover:bg-deep text-sm normal-case",
+                footerActionLink: "text-primary hover:text-deep",
               },
             }}
           />

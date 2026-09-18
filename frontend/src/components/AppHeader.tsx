@@ -19,7 +19,10 @@ export default function AppHeader() {
             </p>
           </div>
         </Link>
-        <UserButton appearance={{ variables: { colorPrimary: "#087D43" } }} />
+        <UserButton
+          afterSignOutUrl="/"
+          appearance={{ variables: { colorPrimary: "#087D43" } }}
+        />
       </div>
     </header>
   );
