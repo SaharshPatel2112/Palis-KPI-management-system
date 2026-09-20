@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { SignedIn, SignedOut, UserButton } from "@clerk/clerk-react";
+import { SignedIn, SignedOut, UserButton, useUser } from "@clerk/clerk-react";
 import {
   BarChart,
   Bar,
@@ -244,6 +244,7 @@ const roles = [
 ];
 
 export default function Home() {
+  const { isSignedIn } = useUser();
   const [live, setLive] = useState<LiveData | null>(null);
 
   useEffect(() => {
@@ -415,6 +416,14 @@ export default function Home() {
             >
               How it works
             </a>
+            {isSignedIn && (
+              <Link
+                to="/dashboard"
+                className="px-4 py-2 rounded-lg hover:bg-soft hover:text-deep text-primary font-semibold"
+              >
+                Dashboard
+              </Link>
+            )}
           </nav>
           <div className="flex items-center gap-3">
             <SignedOut>

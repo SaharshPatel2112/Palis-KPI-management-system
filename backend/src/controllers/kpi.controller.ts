@@ -2,12 +2,14 @@ import type { Request, Response } from "express";
 import { z } from "zod";
 import { prisma } from "../config/prisma.js";
 
+const PERIOD_RE = /^\d{4}(-(0[1-9]|1[0-2])(-(0[1-9]|[12]\d|3[01]))?)?$/;
+
 const upsertKpiEntrySchema = z.object({
   employeeId: z.number().int().positive(),
   metricId: z.number().int().positive(),
   period: z
     .string()
-    .regex(/^\d{4}-(0[1-9]|1[0-2])$/, "period must be in YYYY-MM format"),
+    .regex(PERIOD_RE, "period must be YYYY, YYYY-MM, or YYYY-MM-DD"),
   target: z.number().min(0),
   achieved: z.number().min(0),
   remarks: z.string().max(500).optional(),
@@ -31,24 +33,70 @@ export async function getDashboardSummary(req: Request, res: Response) {
       include: { metric: { include: { department: true } } },
     });
 
-    const summary = new Map<string, { target: number; achieved: number }>();
+    const summary = new Map<
+      string,
+      {
+        empPcts: Map<number, number[]>;
+        metricTotals: Map<
+          number,
+          { name: string; target: number; achieved: number; count: number }
+        >;
+      }
+    >();
+
     for (const entry of entries) {
       const deptName = entry.metric.department.name;
-      const current = summary.get(deptName) ?? { target: 0, achieved: 0 };
-      current.target += entry.target;
-      current.achieved += entry.achieved;
-      summary.set(deptName, current);
+      let current = summary.get(deptName);
+      if (!current) {
+        current = { empPcts: new Map(), metricTotals: new Map() };
+        summary.set(deptName, current);
+      }
+
+      let mTotal = current.metricTotals.get(entry.metricId);
+      if (!mTotal) {
+        mTotal = { name: entry.metric.name, target: 0, achieved: 0, count: 0 };
+        current.metricTotals.set(entry.metricId, mTotal);
+      }
+      mTotal.target += entry.target;
+      mTotal.achieved += entry.achieved;
+      mTotal.count += 1;
+
+      const p = entry.target > 0 ? (entry.achieved / entry.target) * 100 : 0;
+      let empList = current.empPcts.get(entry.employeeId);
+      if (!empList) {
+        empList = [];
+        current.empPcts.set(entry.employeeId, empList);
+      }
+      empList.push(p);
     }
 
-    const result = Array.from(summary.entries()).map(
-      ([department, { target, achieved }]) => ({
+    const result = Array.from(summary.entries()).map(([department, data]) => {
+      let sumOfEmpAvgs = 0;
+      for (const pcts of data.empPcts.values()) {
+        sumOfEmpAvgs += pcts.reduce((a, b) => a + b, 0) / pcts.length;
+      }
+      const achievementPercent =
+        data.empPcts.size > 0
+          ? Math.round(sumOfEmpAvgs / data.empPcts.size)
+          : 0;
+
+      let adjustedTarget = 0;
+      let adjustedAchieved = 0;
+      for (const m of data.metricTotals.values()) {
+        // Apply averaging for percentage metrics
+        const isPct = m.name.includes("(%)");
+        adjustedTarget += isPct && m.count > 0 ? m.target / m.count : m.target;
+        adjustedAchieved +=
+          isPct && m.count > 0 ? m.achieved / m.count : m.achieved;
+      }
+
+      return {
         department,
-        target,
-        achieved,
-        achievementPercent:
-          target > 0 ? Math.round((achieved / target) * 100) : 0,
-      }),
-    );
+        target: Number(adjustedTarget.toFixed(2)),
+        achieved: Number(adjustedAchieved.toFixed(2)),
+        achievementPercent,
+      };
+    });
 
     res.json(result);
   } catch (err) {
@@ -74,13 +122,6 @@ export async function getMyKpis(req: Request, res: Response) {
   }
 }
 
-// List KPI entries for filtering/reporting. ADMIN/HR/MANAGER can pass any
-// departmentId (or none, for "all departments") — MANAGER gets read-only
-// access to every department so they can review and export reports; actual
-// writes are still blocked in upsertKpiEntry, and CSV upload is ADMIN-only.
-// Supports either a single `period` (used by the entry screen) or a
-// `from`/`to` range (used by the reports page) — periods are "YYYY-MM"
-// strings, which sort correctly with plain string comparison.
 export async function listKpiEntries(req: Request, res: Response) {
   try {
     if (!req.employee)
@@ -173,17 +214,6 @@ export async function listDepartments(_req: Request, res: Response) {
   }
 }
 
-// ---------------------------------------------------------------------------
-// CSV bulk upload
-// Expected columns (header row required):
-//   department,employee,metric,period,target,achieved,remarks
-// - `department` and `metric` are matched by name (case-insensitive).
-// - `employee` is matched by email (preferred) or by name within the dept.
-// - `period` must be YYYY-MM. `remarks` is optional.
-// Same scoping rules as upsertKpiEntry: non-ADMIN callers can only write to
-// their own department, and row-level failures are collected, not fatal.
-// ---------------------------------------------------------------------------
-
 function parseCsvGrid(text: string): string[][] {
   const rows: string[][] = [];
   let field = "";
@@ -257,9 +287,11 @@ export async function uploadKpiCsv(req: Request, res: Response) {
     ];
     const missing = required.filter((r) => col(r) === -1);
     if (missing.length > 0) {
-      return res.status(400).json({
-        message: `CSV is missing required column(s): ${missing.join(", ")}`,
-      });
+      return res
+        .status(400)
+        .json({
+          message: `CSV is missing required column(s): ${missing.join(", ")}`,
+        });
     }
     const remarksCol = col("remarks");
 
@@ -276,14 +308,14 @@ export async function uploadKpiCsv(req: Request, res: Response) {
 
     const callerDeptId = req.employee.departmentId;
     const scopedToOwnDept = req.employee.role !== "ADMIN";
-    const periodRe = /^\d{4}-(0[1-9]|1[0-2])$/;
+    const periodRe = PERIOD_RE;
 
     let updated = 0;
     const errors: { row: number; message: string }[] = [];
     const dataRows = grid.slice(1);
 
     for (let i = 0; i < dataRows.length; i++) {
-      const rowNo = i + 2; // 1-based, +1 for header
+      const rowNo = i + 2;
       const cells = dataRows[i];
       const get = (name: string) => {
         const c = col(name);
@@ -293,10 +325,24 @@ export async function uploadKpiCsv(req: Request, res: Response) {
       const deptName = get("department");
       const empKey = get("employee");
       const metricName = get("metric");
-      const period = get("period");
+      let period = get("period");
       const targetStr = get("target");
       const achievedStr = get("achieved");
       const remarks = remarksCol >= 0 ? (cells[remarksCol] ?? "").trim() : "";
+
+      const ddMMyyyy = /^(\d{2})-(\d{2})-(\d{4})$/;
+      const mdy = /^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/;
+
+      if (ddMMyyyy.test(period)) {
+        period = period.replace(ddMMyyyy, "$3-$2-$1");
+      } else if (mdy.test(period)) {
+        const match = period.match(mdy)!;
+        const m = match[1].padStart(2, "0");
+        const d = match[2].padStart(2, "0");
+        let y = match[3];
+        if (y.length === 2) y = (Number(y) < 50 ? "20" : "19") + y;
+        period = `${y}-${m}-${d}`;
+      }
 
       if (!deptName || !empKey || !metricName || !period) {
         errors.push({
@@ -354,7 +400,7 @@ export async function uploadKpiCsv(req: Request, res: Response) {
       if (!periodRe.test(period)) {
         errors.push({
           row: rowNo,
-          message: `Period "${period}" must be YYYY-MM`,
+          message: `Period "${period}" must be YYYY, YYYY-MM, or YYYY-MM-DD`,
         });
         continue;
       }
@@ -403,14 +449,28 @@ export async function uploadKpiCsv(req: Request, res: Response) {
   }
 }
 
-// Monthly target/achieved totals for the last N periods, scoped like the
-// dashboard summary. Feeds the live charts on Home and Dashboard.
 export async function getGrowthTrend(req: Request, res: Response) {
   try {
     if (!req.employee)
       return res.status(403).json({ message: "No employee profile" });
 
-    const months = Math.min(Math.max(Number(req.query.months) || 6, 1), 24);
+    const granularity =
+      req.query.granularity === "daily" || req.query.granularity === "yearly"
+        ? req.query.granularity
+        : "monthly";
+    const maxPeriods = granularity === "yearly" ? 12 : 24;
+    const fallback = granularity === "yearly" ? 5 : 6;
+    const count = Math.min(
+      Math.max(Number(req.query.months) || fallback, 1),
+      maxPeriods,
+    );
+    const bucket = (p: string) =>
+      granularity === "yearly"
+        ? p.slice(0, 4)
+        : granularity === "daily"
+          ? p
+          : p.slice(0, 7);
+
     const scopedToOwnDept =
       req.employee.role === "MANAGER" || req.employee.role === "EMPLOYEE";
     if (scopedToOwnDept && !req.employee.departmentId) {
@@ -424,24 +484,62 @@ export async function getGrowthTrend(req: Request, res: Response) {
       include: { metric: true },
     });
 
-    const byPeriod = new Map<string, { target: number; achieved: number }>();
+    const byPeriod = new Map<
+      string,
+      {
+        pcts: number[];
+        metricTotals: Map<
+          number,
+          { name: string; t: number; a: number; c: number }
+        >;
+      }
+    >();
+
     for (const entry of entries) {
-      const cur = byPeriod.get(entry.period) ?? { target: 0, achieved: 0 };
-      cur.target += entry.target;
-      cur.achieved += entry.achieved;
-      byPeriod.set(entry.period, cur);
+      const key = bucket(entry.period);
+      let cur = byPeriod.get(key);
+      if (!cur) {
+        cur = { pcts: [], metricTotals: new Map() };
+        byPeriod.set(key, cur);
+      }
+
+      let mt = cur.metricTotals.get(entry.metricId);
+      if (!mt) {
+        mt = { name: entry.metric.name, t: 0, a: 0, c: 0 };
+        cur.metricTotals.set(entry.metricId, mt);
+      }
+      mt.t += entry.target;
+      mt.a += entry.achieved;
+      mt.c += 1;
+
+      const p = entry.target > 0 ? (entry.achieved / entry.target) * 100 : 0;
+      cur.pcts.push(p);
     }
 
-    const periods = Array.from(byPeriod.keys()).sort().slice(-months);
+    const periods = Array.from(byPeriod.keys()).sort().slice(-count);
     res.json(
       periods.map((p) => {
-        const { target, achieved } = byPeriod.get(p)!;
+        const cur = byPeriod.get(p)!;
+
+        let target = 0;
+        let achieved = 0;
+        for (const mt of cur.metricTotals.values()) {
+          // Apply averaging for percentage metrics
+          const isPct = mt.name.includes("(%)");
+          target += isPct && mt.c > 0 ? mt.t / mt.c : mt.t;
+          achieved += isPct && mt.c > 0 ? mt.a / mt.c : mt.a;
+        }
+
+        const achievementPercent =
+          cur.pcts.length > 0
+            ? Math.round(cur.pcts.reduce((a, b) => a + b, 0) / cur.pcts.length)
+            : 0;
+
         return {
           period: p,
-          target,
-          achieved,
-          achievementPercent:
-            target > 0 ? Math.round((achieved / target) * 100) : 0,
+          target: Number(target.toFixed(2)),
+          achieved: Number(achieved.toFixed(2)),
+          achievementPercent,
         };
       }),
     );
@@ -451,10 +549,6 @@ export async function getGrowthTrend(req: Request, res: Response) {
   }
 }
 
-// Per-department, per-metric breakdown for the dashboard charts. Aggregates
-// target/achieved across all employees of each metric, scoped like the
-// dashboard summary. Each metric keeps its own unit, so the UI charts
-// achievement % (unit-agnostic) and shows raw target/achieved alongside.
 export async function getDepartmentBreakdown(req: Request, res: Response) {
   try {
     if (!req.employee)
@@ -478,8 +572,7 @@ export async function getDepartmentBreakdown(req: Request, res: Response) {
       {
         id: number;
         name: string;
-        target: number;
-        achieved: number;
+        empPcts: Map<number, number[]>;
         metrics: Map<
           number,
           {
@@ -488,6 +581,8 @@ export async function getDepartmentBreakdown(req: Request, res: Response) {
             unit: string | null;
             target: number;
             achieved: number;
+            pcts: number[];
+            count: number;
           }
         >;
       }
@@ -500,14 +595,20 @@ export async function getDepartmentBreakdown(req: Request, res: Response) {
         d = {
           id: dept.id,
           name: dept.name,
-          target: 0,
-          achieved: 0,
+          empPcts: new Map(),
           metrics: new Map(),
         };
         deptMap.set(dept.id, d);
       }
-      d.target += entry.target;
-      d.achieved += entry.achieved;
+
+      const p = entry.target > 0 ? (entry.achieved / entry.target) * 100 : 0;
+
+      let empList = d.empPcts.get(entry.employeeId);
+      if (!empList) {
+        empList = [];
+        d.empPcts.set(entry.employeeId, empList);
+      }
+      empList.push(p);
 
       let m = d.metrics.get(entry.metricId);
       if (!m) {
@@ -517,28 +618,59 @@ export async function getDepartmentBreakdown(req: Request, res: Response) {
           unit: entry.metric.unit,
           target: 0,
           achieved: 0,
+          pcts: [],
+          count: 0,
         };
         d.metrics.set(entry.metricId, m);
       }
       m.target += entry.target;
       m.achieved += entry.achieved;
+      m.pcts.push(p);
+      m.count += 1;
     }
 
-    const pct = (t: number, a: number) =>
-      t > 0 ? Math.round((a / t) * 100) : 0;
-
     res.json(
-      Array.from(deptMap.values()).map((d) => ({
-        id: d.id,
-        name: d.name,
-        target: d.target,
-        achieved: d.achieved,
-        achievementPercent: pct(d.target, d.achieved),
-        metrics: Array.from(d.metrics.values()).map((m) => ({
-          ...m,
-          achievementPercent: pct(m.target, m.achieved),
-        })),
-      })),
+      Array.from(deptMap.values()).map((d) => {
+        let sumOfEmpAvgs = 0;
+        for (const pcts of d.empPcts.values()) {
+          sumOfEmpAvgs += pcts.reduce((a, b) => a + b, 0) / pcts.length;
+        }
+        const achievementPercent =
+          d.empPcts.size > 0 ? Math.round(sumOfEmpAvgs / d.empPcts.size) : 0;
+
+        const metrics = Array.from(d.metrics.values()).map((m) => {
+          // Apply averaging for percentage metrics
+          const isPct = m.name.includes("(%)");
+          const finalTarget =
+            isPct && m.count > 0 ? m.target / m.count : m.target;
+          const finalAchieved =
+            isPct && m.count > 0 ? m.achieved / m.count : m.achieved;
+
+          return {
+            id: m.id,
+            name: m.name,
+            unit: m.unit,
+            target: Number(finalTarget.toFixed(2)),
+            achieved: Number(finalAchieved.toFixed(2)),
+            achievementPercent:
+              m.pcts.length > 0
+                ? Math.round(m.pcts.reduce((a, b) => a + b, 0) / m.pcts.length)
+                : 0,
+          };
+        });
+
+        const deptTarget = metrics.reduce((acc, m) => acc + m.target, 0);
+        const deptAchieved = metrics.reduce((acc, m) => acc + m.achieved, 0);
+
+        return {
+          id: d.id,
+          name: d.name,
+          target: Number(deptTarget.toFixed(2)),
+          achieved: Number(deptAchieved.toFixed(2)),
+          achievementPercent,
+          metrics,
+        };
+      }),
     );
   } catch (err) {
     console.error("getDepartmentBreakdown error:", err);
@@ -546,30 +678,59 @@ export async function getDepartmentBreakdown(req: Request, res: Response) {
   }
 }
 
-// Per-employee overall achievement across every logged period — feeds the
-// Users' KPI directory (Admin/HR). Sorted best-first.
 export async function getEmployeeProgress(req: Request, res: Response) {
   try {
     if (!req.employee)
       return res.status(403).json({ message: "No employee profile" });
 
     const employees = await prisma.employee.findMany({
-      include: { department: true, entries: true },
+      include: { department: true, entries: { include: { metric: true } } },
     });
 
     const result = employees.map((e) => {
-      const target = e.entries.reduce((s, x) => s + x.target, 0);
-      const achieved = e.entries.reduce((s, x) => s + x.achieved, 0);
+      const metricGroups = new Map<
+        number,
+        { name: string; target: number; achieved: number; count: number }
+      >();
+
+      for (const x of e.entries) {
+        let mg = metricGroups.get(x.metricId);
+        if (!mg) {
+          mg = { name: x.metric.name, target: 0, achieved: 0, count: 0 };
+          metricGroups.set(x.metricId, mg);
+        }
+        mg.target += x.target;
+        mg.achieved += x.achieved;
+        mg.count += 1;
+      }
+
+      let target = 0;
+      let achieved = 0;
+      for (const mg of metricGroups.values()) {
+        // Apply averaging for percentage metrics
+        const isPct = mg.name.includes("(%)");
+        target += isPct && mg.count > 0 ? mg.target / mg.count : mg.target;
+        achieved +=
+          isPct && mg.count > 0 ? mg.achieved / mg.count : mg.achieved;
+      }
+
+      const pcts = e.entries.map((x) =>
+        x.target > 0 ? (x.achieved / x.target) * 100 : 0,
+      );
+      const achievementPercent =
+        pcts.length > 0
+          ? Math.round(pcts.reduce((a, b) => a + b, 0) / pcts.length)
+          : 0;
+
       return {
         id: e.id,
         name: e.name,
         email: e.email,
         role: e.role,
         department: e.department?.name ?? null,
-        target,
-        achieved,
-        achievementPercent:
-          target > 0 ? Math.round((achieved / target) * 100) : 0,
+        target: Number(target.toFixed(2)),
+        achieved: Number(achieved.toFixed(2)),
+        achievementPercent,
       };
     });
 

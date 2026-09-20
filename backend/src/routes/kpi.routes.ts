@@ -4,7 +4,6 @@ import {
   getDashboardSummary,
   getMyKpis,
   listKpiEntries,
-  upsertKpiEntry,
   listDepartments,
   uploadKpiCsv,
   getGrowthTrend,
@@ -25,7 +24,7 @@ router.get(
 router.get("/my-kpis", requireRole(), getMyKpis);
 router.get("/entries", requireRole("ADMIN", "HR", "MANAGER"), listKpiEntries);
 router.get("/departments", requireRole(), listDepartments);
-router.post("/entry", requireRole("ADMIN", "HR", "MANAGER"), upsertKpiEntry);
+// CSV upload is the only write path for KPI data.
 router.post("/upload-csv", requireRole("ADMIN"), uploadKpiCsv);
 
 export default router;

@@ -10,7 +10,6 @@ import {
 import Home from "./pages/Home";
 import Dashboard from "./pages/Dashboard";
 import TeamPage from "./pages/TeamPage";
-import DepartmentEntryPage from "./pages/DepartmentEntryPage";
 import CsvUploadPage from "./pages/CsvUploadPage";
 import UsersKpisPage from "./pages/UsersKpisPage";
 import EmployeeKpiDetailPage from "./pages/EmployeeKpiDetailPage";
@@ -111,14 +110,6 @@ export default function App() {
         element={
           <Protected>
             <TeamPage />
-          </Protected>
-        }
-      />
-      <Route
-        path="/kpi/:department"
-        element={
-          <Protected>
-            <DepartmentEntryPage />
           </Protected>
         }
       />

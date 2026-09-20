@@ -16,6 +16,7 @@ import { client } from "../api/client";
 import KpiCard from "../components/KpiCard";
 import AppHeader from "../components/AppHeader";
 import { useEmployee } from "../hooks/useEmployee";
+import { ArrowLeft } from "lucide-react";
 
 type DeptSummary = {
   department: string;
@@ -228,16 +229,17 @@ export default function Dashboard() {
       <AppHeader />
       <div className="p-8">
         <div className="flex items-center justify-between mb-6">
-          <h1 className="text-2xl font-semibold text-ink">Overview</h1>
+          <div className="flex items-center gap-3">
+            <Link
+              to="/"
+              className="text-muted hover:text-ink transition-colors"
+            >
+              <ArrowLeft size={24} />
+            </Link>
+            <h1 className="text-2xl font-semibold text-ink">Dashboard</h1>
+          </div>
           <div className="flex items-center gap-5">
-            {employee?.role === "ADMIN" || employee?.role === "HR" ? (
-              <Link
-                to="/users-kpis"
-                className="text-sm font-medium text-primary hover:text-deep"
-              >
-                Users&apos; KPIs
-              </Link>
-            ) : (
+            {employee?.role !== "ADMIN" && (
               <Link
                 to="/my-kpis"
                 className="text-sm font-medium text-primary hover:text-deep"
@@ -245,14 +247,14 @@ export default function Dashboard() {
                 My KPIs
               </Link>
             )}
-            {canManage && (
+            {employee?.role === "ADMIN" || employee?.role === "HR" ? (
               <Link
-                to="/kpi/sales"
+                to="/users-kpis"
                 className="text-sm font-medium text-primary hover:text-deep"
               >
-                Log KPIs
+                Users&apos; KPIs
               </Link>
-            )}
+            ) : null}
             {employee?.role === "ADMIN" && (
               <Link
                 to="/upload-csv"

@@ -19,10 +19,17 @@ type ReportRow = {
   };
 };
 
-function currentPeriod() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+function isoDate(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
+
+const today = () => isoDate(new Date());
+
+const daysAgo = (n: number) => {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return isoDate(d);
+};
 
 function pct(target: number, achieved: number) {
   return target > 0 ? Math.round((achieved / target) * 100) : 0;
@@ -69,8 +76,10 @@ export default function ReportsPage() {
   const { employee, loading: meLoading } = useEmployee();
   const [departments, setDepartments] = useState<Dept[]>([]);
   const [departmentId, setDepartmentId] = useState<number | "">("");
-  const [from, setFrom] = useState(currentPeriod());
-  const [to, setTo] = useState(currentPeriod());
+
+  const [from, setFrom] = useState(daysAgo(30));
+  const [to, setTo] = useState(today());
+
   const [rows, setRows] = useState<ReportRow[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -105,7 +114,12 @@ export default function ReportsPage() {
   const totals = useMemo(() => {
     const t = rows.reduce((sum, r) => sum + r.target, 0);
     const a = rows.reduce((sum, r) => sum + r.achieved, 0);
-    return { target: t, achieved: a, pct: pct(t, a) };
+    const avg = rows.length
+      ? Math.round(
+          rows.reduce((s, r) => s + pct(r.target, r.achieved), 0) / rows.length,
+        )
+      : 0;
+    return { target: t, achieved: a, pct: avg };
   }, [rows]);
 
   if (
@@ -130,7 +144,7 @@ export default function ReportsPage() {
           </div>
           <Link
             to="/dashboard"
-            className="text-sm font-medium text-primary hover:text-deep"
+            className="text-sm font-medium text-primary hover:text-deep shrink-0"
           >
             Back to dashboard
           </Link>
@@ -155,18 +169,18 @@ export default function ReportsPage() {
             </select>
           </div>
           <div>
-            <label className="block text-xs text-muted mb-1">From</label>
+            <label className="block text-xs text-muted mb-1">From date</label>
             <input
-              type="month"
+              type="date"
               value={from}
               onChange={(e) => setFrom(e.target.value)}
               className="border border-line rounded-md px-3 py-2 text-sm"
             />
           </div>
           <div>
-            <label className="block text-xs text-muted mb-1">To</label>
+            <label className="block text-xs text-muted mb-1">To date</label>
             <input
-              type="month"
+              type="date"
               value={to}
               onChange={(e) => setTo(e.target.value)}
               className="border border-line rounded-md px-3 py-2 text-sm"
@@ -205,7 +219,7 @@ export default function ReportsPage() {
                 </span>
               </span>
               <span className="text-muted">
-                Overall:{" "}
+                Overall KPI Ranking:{" "}
                 <span className="text-primary font-semibold font-mono">
                   {totals.pct}%
                 </span>
