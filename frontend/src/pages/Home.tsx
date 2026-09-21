@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { SignedIn, SignedOut, UserButton, useUser } from "@clerk/clerk-react";
+import {
+  SignedIn,
+  SignedOut,
+  UserButton,
+  useUser,
+  useAuth,
+} from "@clerk/clerk-react";
 import {
   BarChart,
   Bar,
@@ -242,7 +248,6 @@ const roles = [
   },
 ];
 
-// Global Date Constants
 const NOW = new Date();
 const CURRENT_YEAR = NOW.getFullYear().toString();
 const CURRENT_MONTH = String(NOW.getMonth() + 1).padStart(2, "0");
@@ -255,19 +260,31 @@ const YEAR_OPTIONS = [
 
 export default function Home() {
   const { isSignedIn, isLoaded } = useUser();
+  const { getToken } = useAuth();
   const [live, setLive] = useState<LiveData | null>(null);
   const [isFetching, setIsFetching] = useState(true);
 
-  // Custom Filters
   const [selectedYear, setSelectedYear] = useState(CURRENT_YEAR);
   const [selectedPeriod, setSelectedPeriod] = useState(CURRENT_MONTH);
 
   useEffect(() => {
+    // 1. Wait until Clerk has verified authentication status
+    if (!isLoaded) return;
+
+    // 2. If visitor is signed out, don't trigger API calls
+    if (!isSignedIn) {
+      setIsFetching(false);
+      setLive(null);
+      return;
+    }
+
     let cancelled = false;
     setIsFetching(true);
 
     const getParams = () => {
-      if (selectedYear === "all") return {};
+      // all=true ensures company-wide data like admin on the homepage
+      const base: Record<string, string> = { all: "true" };
+      if (selectedYear === "all") return base;
       if (selectedPeriod === "year") {
         if (selectedYear === CURRENT_YEAR) {
           const lastDay = new Date(
@@ -276,36 +293,42 @@ export default function Home() {
             0,
           ).getDate();
           return {
+            ...base,
             from: `${selectedYear}-01-01`,
             to: `${selectedYear}-${CURRENT_MONTH}-${lastDay}`,
           };
         } else {
-          return { period: selectedYear };
+          return { ...base, period: selectedYear };
         }
       }
       if (selectedPeriod.startsWith("q")) {
         const q = selectedPeriod.charAt(1);
         const from = `${selectedYear}-${q === "1" ? "01" : q === "2" ? "04" : q === "3" ? "07" : "10"}-01`;
         const to = `${selectedYear}-${q === "1" ? "03-31" : q === "2" ? "06-30" : q === "3" ? "09-30" : "12-31"}`;
-        return { from, to };
+        return { ...base, from, to };
       }
-      return { period: `${selectedYear}-${selectedPeriod}` };
+      return { ...base, period: `${selectedYear}-${selectedPeriod}` };
     };
 
     (async () => {
       try {
-        const params = getParams();
+        const token = await getToken();
+        const config = {
+          params: getParams(),
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        };
+
         const [trend, summary, breakdown] = await Promise.all([
           client.get<TrendPoint[]>("/kpi/growth-trend", {
-            params: { months: 6, ...params },
+            ...config,
+            params: { months: 6, ...config.params },
           }),
-          client.get<SummaryPoint[]>("/kpi/dashboard-summary", { params }),
-          client.get<BreakdownDept[]>("/kpi/department-breakdown", { params }),
+          client.get<SummaryPoint[]>("/kpi/dashboard-summary", config),
+          client.get<BreakdownDept[]>("/kpi/department-breakdown", config),
         ]);
 
         if (cancelled) return;
 
-        // No Data Alert Logic
         if (breakdown.data.length === 0) {
           if (
             selectedYear !== CURRENT_YEAR ||
@@ -325,18 +348,19 @@ export default function Home() {
           summary: summary.data,
           breakdown: breakdown.data,
         });
-      } catch {
-        // Keeps fallback layout on fetch fail or signed out states
+      } catch (err) {
+        console.error("Home live fetch error:", err);
       } finally {
         if (!cancelled) {
           setIsFetching(false);
         }
       }
     })();
+
     return () => {
       cancelled = true;
     };
-  }, [selectedYear, selectedPeriod]);
+  }, [isLoaded, isSignedIn, selectedYear, selectedPeriod, getToken]);
 
   const overall = useMemo(() => {
     if (!live || live.summary.length === 0) return null;
@@ -715,9 +739,7 @@ export default function Home() {
                       onChange={(e) => setSelectedPeriod(e.target.value)}
                       className="border border-line rounded-md px-3 py-1.5 text-sm bg-white text-ink focus:outline-none focus:border-primary shadow-sm cursor-pointer"
                     >
-                      <option value="year">
-                        Current Year ({selectedYear})
-                      </option>
+                      <option value="year">Full Year ({selectedYear})</option>
                       <optgroup label="Quarters">
                         <option value="q1">Q1 (Jan - Mar)</option>
                         <option value="q2">Q2 (Apr - Jun)</option>

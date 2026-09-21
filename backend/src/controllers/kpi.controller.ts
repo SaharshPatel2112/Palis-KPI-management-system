@@ -20,32 +20,46 @@ export async function getDashboardSummary(req: Request, res: Response) {
     if (!req.employee)
       return res.status(403).json({ message: "No employee profile" });
 
+    const { period, from, to, all } = req.query as {
+      period?: string;
+      from?: string;
+      to?: string;
+      all?: string;
+    };
+
+    // all=true allows company-wide view on public/homepage overviews
+    const isCompanyWide = all === "true";
     const scopedToOwnDept =
-      req.employee.role === "MANAGER" || req.employee.role === "EMPLOYEE";
+      !isCompanyWide &&
+      (req.employee.role === "MANAGER" || req.employee.role === "EMPLOYEE");
+
     if (scopedToOwnDept && !req.employee.departmentId) {
       return res.json([]);
     }
 
-    const { period, from, to } = req.query as {
-      period?: string;
-      from?: string;
-      to?: string;
-    };
     const periodFilter: { startsWith?: string; gte?: string; lte?: string } =
       {};
     if (period) periodFilter.startsWith = period;
     if (from) periodFilter.gte = from;
     if (to) periodFilter.lte = to;
 
-    const entries = await prisma.kpiEntry.findMany({
-      where: {
-        ...(scopedToOwnDept
-          ? { metric: { departmentId: req.employee.departmentId! } }
-          : {}),
-        ...(Object.keys(periodFilter).length ? { period: periodFilter } : {}),
-      },
-      include: { metric: { include: { department: true } } },
-    });
+    const [allDepartments, entries] = await Promise.all([
+      prisma.department.findMany({ orderBy: { id: "asc" } }),
+      prisma.kpiEntry.findMany({
+        where: {
+          ...(scopedToOwnDept
+            ? { metric: { departmentId: req.employee.departmentId! } }
+            : {}),
+          ...(Object.keys(periodFilter).length ? { period: periodFilter } : {}),
+        },
+        include: { metric: { include: { department: true } } },
+      }),
+    ]);
+
+    const targetDeptIds =
+      scopedToOwnDept && req.employee.departmentId
+        ? [req.employee.departmentId]
+        : allDepartments.map((d) => d.id);
 
     const summary = new Map<
       string,
@@ -57,6 +71,12 @@ export async function getDashboardSummary(req: Request, res: Response) {
         >;
       }
     >();
+
+    for (const dept of allDepartments) {
+      if (targetDeptIds.includes(dept.id)) {
+        summary.set(dept.name, { empPcts: new Map(), metricTotals: new Map() });
+      }
+    }
 
     for (const entry of entries) {
       const deptName = entry.metric.department.name;
@@ -485,18 +505,22 @@ export async function getGrowthTrend(req: Request, res: Response) {
           ? p
           : p.slice(0, 7);
 
+    const { period, from, to, all } = req.query as {
+      period?: string;
+      from?: string;
+      to?: string;
+      all?: string;
+    };
+
+    const isCompanyWide = all === "true";
     const scopedToOwnDept =
-      req.employee.role === "MANAGER" || req.employee.role === "EMPLOYEE";
+      !isCompanyWide &&
+      (req.employee.role === "MANAGER" || req.employee.role === "EMPLOYEE");
+
     if (scopedToOwnDept && !req.employee.departmentId) {
       return res.json([]);
     }
 
-    // Capture date boundaries to accurately crop the trend chart
-    const { period, from, to } = req.query as {
-      period?: string;
-      from?: string;
-      to?: string;
-    };
     let ltePeriod: string | undefined = undefined;
     if (to) {
       ltePeriod = to;
@@ -509,7 +533,7 @@ export async function getGrowthTrend(req: Request, res: Response) {
         ...(scopedToOwnDept
           ? { metric: { departmentId: req.employee.departmentId! } }
           : {}),
-        ...(ltePeriod ? { period: { lte: ltePeriod } } : {}), // Anchor the trend
+        ...(ltePeriod ? { period: { lte: ltePeriod } } : {}),
       },
       include: { metric: true },
     });
@@ -583,32 +607,48 @@ export async function getDepartmentBreakdown(req: Request, res: Response) {
     if (!req.employee)
       return res.status(403).json({ message: "No employee profile" });
 
+    const { period, from, to, all } = req.query as {
+      period?: string;
+      from?: string;
+      to?: string;
+      all?: string;
+    };
+
+    const isCompanyWide = all === "true";
     const scopedToOwnDept =
-      req.employee.role === "MANAGER" || req.employee.role === "EMPLOYEE";
+      !isCompanyWide &&
+      (req.employee.role === "MANAGER" || req.employee.role === "EMPLOYEE");
+
     if (scopedToOwnDept && !req.employee.departmentId) {
       return res.json([]);
     }
 
-    const { period, from, to } = req.query as {
-      period?: string;
-      from?: string;
-      to?: string;
-    };
     const periodFilter: { startsWith?: string; gte?: string; lte?: string } =
       {};
     if (period) periodFilter.startsWith = period;
     if (from) periodFilter.gte = from;
     if (to) periodFilter.lte = to;
 
-    const entries = await prisma.kpiEntry.findMany({
-      where: {
-        ...(scopedToOwnDept
-          ? { metric: { departmentId: req.employee.departmentId! } }
-          : {}),
-        ...(Object.keys(periodFilter).length ? { period: periodFilter } : {}),
-      },
-      include: { metric: { include: { department: true } } },
-    });
+    const [allDepartments, entries] = await Promise.all([
+      prisma.department.findMany({
+        include: { metrics: true },
+        orderBy: { id: "asc" },
+      }),
+      prisma.kpiEntry.findMany({
+        where: {
+          ...(scopedToOwnDept
+            ? { metric: { departmentId: req.employee.departmentId! } }
+            : {}),
+          ...(Object.keys(periodFilter).length ? { period: periodFilter } : {}),
+        },
+        include: { metric: { include: { department: true } } },
+      }),
+    ]);
+
+    const targetDeptIds =
+      scopedToOwnDept && req.employee.departmentId
+        ? [req.employee.departmentId]
+        : allDepartments.map((d) => d.id);
 
     const deptMap = new Map<
       number,
@@ -631,18 +671,33 @@ export async function getDepartmentBreakdown(req: Request, res: Response) {
       }
     >();
 
-    for (const entry of entries) {
-      const dept = entry.metric.department;
-      let d = deptMap.get(dept.id);
-      if (!d) {
-        d = {
+    for (const dept of allDepartments) {
+      if (targetDeptIds.includes(dept.id)) {
+        deptMap.set(dept.id, {
           id: dept.id,
           name: dept.name,
           empPcts: new Map(),
-          metrics: new Map(),
-        };
-        deptMap.set(dept.id, d);
+          metrics: new Map(
+            dept.metrics.map((m) => [
+              m.id,
+              {
+                id: m.id,
+                name: m.name,
+                unit: m.unit,
+                target: 0,
+                achieved: 0,
+                pcts: [],
+                count: 0,
+              },
+            ]),
+          ),
+        });
       }
+    }
+
+    for (const entry of entries) {
+      const d = deptMap.get(entry.metric.departmentId);
+      if (!d) continue;
 
       const p = entry.target > 0 ? (entry.achieved / entry.target) * 100 : 0;
 
