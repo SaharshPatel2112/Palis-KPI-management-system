@@ -31,11 +31,10 @@ import {
   LayoutDashboard,
   ArrowUpRight,
   ArrowDownRight,
+  Loader2,
 } from "lucide-react";
 import { client } from "../api/client";
 
-// Illustrative fallbacks — only used for signed-out visitors. Anyone signed
-// in sees live numbers from Postgres, scoped to their role.
 const heroChartData = [
   { m: "Apr", target: 180, achieved: 162 },
   { m: "May", target: 195, achieved: 178 },
@@ -243,38 +242,102 @@ const roles = [
   },
 ];
 
+// Global Date Constants
+const NOW = new Date();
+const CURRENT_YEAR = NOW.getFullYear().toString();
+const CURRENT_MONTH = String(NOW.getMonth() + 1).padStart(2, "0");
+const YEAR_OPTIONS = [
+  NOW.getFullYear() - 1,
+  NOW.getFullYear(),
+  NOW.getFullYear() + 1,
+  NOW.getFullYear() + 2,
+];
+
 export default function Home() {
-  const { isSignedIn } = useUser();
+  const { isSignedIn, isLoaded } = useUser();
   const [live, setLive] = useState<LiveData | null>(null);
+  const [isFetching, setIsFetching] = useState(true);
+
+  // Custom Filters
+  const [selectedYear, setSelectedYear] = useState(CURRENT_YEAR);
+  const [selectedPeriod, setSelectedPeriod] = useState(CURRENT_MONTH);
 
   useEffect(() => {
     let cancelled = false;
+    setIsFetching(true);
+
+    const getParams = () => {
+      if (selectedYear === "all") return {};
+      if (selectedPeriod === "year") {
+        if (selectedYear === CURRENT_YEAR) {
+          const lastDay = new Date(
+            NOW.getFullYear(),
+            NOW.getMonth() + 1,
+            0,
+          ).getDate();
+          return {
+            from: `${selectedYear}-01-01`,
+            to: `${selectedYear}-${CURRENT_MONTH}-${lastDay}`,
+          };
+        } else {
+          return { period: selectedYear };
+        }
+      }
+      if (selectedPeriod.startsWith("q")) {
+        const q = selectedPeriod.charAt(1);
+        const from = `${selectedYear}-${q === "1" ? "01" : q === "2" ? "04" : q === "3" ? "07" : "10"}-01`;
+        const to = `${selectedYear}-${q === "1" ? "03-31" : q === "2" ? "06-30" : q === "3" ? "09-30" : "12-31"}`;
+        return { from, to };
+      }
+      return { period: `${selectedYear}-${selectedPeriod}` };
+    };
+
     (async () => {
       try {
+        const params = getParams();
         const [trend, summary, breakdown] = await Promise.all([
           client.get<TrendPoint[]>("/kpi/growth-trend", {
-            params: { months: 6 },
+            params: { months: 6, ...params },
           }),
-          client.get<SummaryPoint[]>("/kpi/dashboard-summary"),
-          client.get<BreakdownDept[]>("/kpi/department-breakdown"),
+          client.get<SummaryPoint[]>("/kpi/dashboard-summary", { params }),
+          client.get<BreakdownDept[]>("/kpi/department-breakdown", { params }),
         ]);
-        if (!cancelled) {
-          setLive({
-            trend: trend.data,
-            summary: summary.data,
-            breakdown: breakdown.data,
-          });
+
+        if (cancelled) return;
+
+        // No Data Alert Logic
+        if (breakdown.data.length === 0) {
+          if (
+            selectedYear !== CURRENT_YEAR ||
+            selectedPeriod !== CURRENT_MONTH
+          ) {
+            setTimeout(() => {
+              alert("There is no data for this option.");
+              setSelectedYear(CURRENT_YEAR);
+              setSelectedPeriod(CURRENT_MONTH);
+            }, 10);
+            return;
+          }
         }
+
+        setLive({
+          trend: trend.data,
+          summary: summary.data,
+          breakdown: breakdown.data,
+        });
       } catch {
-        // Signed out or API unreachable — illustrative fallbacks stay.
+        // Keeps fallback layout on fetch fail or signed out states
+      } finally {
+        if (!cancelled) {
+          setIsFetching(false);
+        }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [selectedYear, selectedPeriod]);
 
-  // ---- derived real data ----------------------------------------------
   const overall = useMemo(() => {
     if (!live || live.summary.length === 0) return null;
     const target = live.summary.reduce((s, d) => s + d.target, 0);
@@ -378,6 +441,14 @@ export default function Home() {
         : overall.pct >= 70
           ? "text-warn"
           : "text-bad";
+
+  if (!isLoaded || isFetching) {
+    return (
+      <div className="min-h-screen bg-white flex items-center justify-center">
+        <Loader2 className="animate-spin text-primary" size={32} />
+      </div>
+    );
+  }
 
   return (
     <div className="bg-white text-ink">
@@ -540,7 +611,7 @@ export default function Home() {
                       ) : (
                         <ArrowDownRight size={13} />
                       )}
-                      {Math.abs(delta)}% vs last month
+                      {Math.abs(delta)}% vs last period
                     </p>
                   )}
                 </div>
@@ -608,8 +679,8 @@ export default function Home() {
       {/* OVERVIEW STATS */}
       <section className="py-20 bg-panel">
         <div className="max-w-6xl mx-auto px-6 md:px-8">
-          <div className="max-w-xl mb-11 flex items-end justify-between gap-4">
-            <div>
+          <div className="mb-11 flex flex-col md:flex-row md:items-end justify-between gap-6">
+            <div className="max-w-xl">
               <h2 className="text-3xl text-ink">
                 Where the business stands today
               </h2>
@@ -620,11 +691,60 @@ export default function Home() {
               </p>
             </div>
             {live && (
-              <span className="shrink-0 font-mono text-[11px] text-primary bg-soft border border-primary/20 px-3 py-1.5 rounded-full">
-                ● LIVE
-              </span>
+              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 shrink-0">
+                <span className="font-mono text-[11px] text-primary bg-soft border border-primary/20 px-3 py-1.5 rounded-full">
+                  ● LIVE
+                </span>
+                <div className="flex gap-2">
+                  <select
+                    value={selectedYear}
+                    onChange={(e) => setSelectedYear(e.target.value)}
+                    className="border border-line rounded-md px-3 py-1.5 text-sm bg-white text-ink focus:outline-none focus:border-primary shadow-sm cursor-pointer"
+                  >
+                    <option value="all">All Time</option>
+                    {YEAR_OPTIONS.map((y) => (
+                      <option key={y} value={y}>
+                        {y}
+                      </option>
+                    ))}
+                  </select>
+
+                  {selectedYear !== "all" && (
+                    <select
+                      value={selectedPeriod}
+                      onChange={(e) => setSelectedPeriod(e.target.value)}
+                      className="border border-line rounded-md px-3 py-1.5 text-sm bg-white text-ink focus:outline-none focus:border-primary shadow-sm cursor-pointer"
+                    >
+                      <option value="year">
+                        Current Year ({selectedYear})
+                      </option>
+                      <optgroup label="Quarters">
+                        <option value="q1">Q1 (Jan - Mar)</option>
+                        <option value="q2">Q2 (Apr - Jun)</option>
+                        <option value="q3">Q3 (Jul - Sep)</option>
+                        <option value="q4">Q4 (Oct - Dec)</option>
+                      </optgroup>
+                      <optgroup label="Months">
+                        <option value="01">January</option>
+                        <option value="02">February</option>
+                        <option value="03">March</option>
+                        <option value="04">April</option>
+                        <option value="05">May</option>
+                        <option value="06">June</option>
+                        <option value="07">July</option>
+                        <option value="08">August</option>
+                        <option value="09">September</option>
+                        <option value="10">October</option>
+                        <option value="11">November</option>
+                        <option value="12">December</option>
+                      </optgroup>
+                    </select>
+                  )}
+                </div>
+              </div>
             )}
           </div>
+
           <div className="grid grid-cols-2 md:grid-cols-4 gap-5">
             {overviewStats.map((s: any) => (
               <div

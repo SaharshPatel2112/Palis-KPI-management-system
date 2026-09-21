@@ -26,10 +26,24 @@ export async function getDashboardSummary(req: Request, res: Response) {
       return res.json([]);
     }
 
+    const { period, from, to } = req.query as {
+      period?: string;
+      from?: string;
+      to?: string;
+    };
+    const periodFilter: { startsWith?: string; gte?: string; lte?: string } =
+      {};
+    if (period) periodFilter.startsWith = period;
+    if (from) periodFilter.gte = from;
+    if (to) periodFilter.lte = to;
+
     const entries = await prisma.kpiEntry.findMany({
-      where: scopedToOwnDept
-        ? { metric: { departmentId: req.employee.departmentId! } }
-        : undefined,
+      where: {
+        ...(scopedToOwnDept
+          ? { metric: { departmentId: req.employee.departmentId! } }
+          : {}),
+        ...(Object.keys(periodFilter).length ? { period: periodFilter } : {}),
+      },
       include: { metric: { include: { department: true } } },
     });
 
@@ -83,7 +97,6 @@ export async function getDashboardSummary(req: Request, res: Response) {
       let adjustedTarget = 0;
       let adjustedAchieved = 0;
       for (const m of data.metricTotals.values()) {
-        // Apply averaging for percentage metrics
         const isPct = m.name.includes("(%)");
         adjustedTarget += isPct && m.count > 0 ? m.target / m.count : m.target;
         adjustedAchieved +=
@@ -139,8 +152,9 @@ export async function listKpiEntries(req: Request, res: Response) {
       ? Number(departmentId)
       : undefined;
 
-    const periodFilter: { equals?: string; gte?: string; lte?: string } = {};
-    if (period) periodFilter.equals = period;
+    const periodFilter: { startsWith?: string; gte?: string; lte?: string } =
+      {};
+    if (period) periodFilter.startsWith = period;
     if (from) periodFilter.gte = from;
     if (to) periodFilter.lte = to;
 
@@ -477,10 +491,26 @@ export async function getGrowthTrend(req: Request, res: Response) {
       return res.json([]);
     }
 
+    // Capture date boundaries to accurately crop the trend chart
+    const { period, from, to } = req.query as {
+      period?: string;
+      from?: string;
+      to?: string;
+    };
+    let ltePeriod: string | undefined = undefined;
+    if (to) {
+      ltePeriod = to;
+    } else if (period) {
+      ltePeriod = period.length === 4 ? `${period}-12-31` : `${period}-31`;
+    }
+
     const entries = await prisma.kpiEntry.findMany({
-      where: scopedToOwnDept
-        ? { metric: { departmentId: req.employee.departmentId! } }
-        : undefined,
+      where: {
+        ...(scopedToOwnDept
+          ? { metric: { departmentId: req.employee.departmentId! } }
+          : {}),
+        ...(ltePeriod ? { period: { lte: ltePeriod } } : {}), // Anchor the trend
+      },
       include: { metric: true },
     });
 
@@ -524,7 +554,6 @@ export async function getGrowthTrend(req: Request, res: Response) {
         let target = 0;
         let achieved = 0;
         for (const mt of cur.metricTotals.values()) {
-          // Apply averaging for percentage metrics
           const isPct = mt.name.includes("(%)");
           target += isPct && mt.c > 0 ? mt.t / mt.c : mt.t;
           achieved += isPct && mt.c > 0 ? mt.a / mt.c : mt.a;
@@ -560,10 +589,24 @@ export async function getDepartmentBreakdown(req: Request, res: Response) {
       return res.json([]);
     }
 
+    const { period, from, to } = req.query as {
+      period?: string;
+      from?: string;
+      to?: string;
+    };
+    const periodFilter: { startsWith?: string; gte?: string; lte?: string } =
+      {};
+    if (period) periodFilter.startsWith = period;
+    if (from) periodFilter.gte = from;
+    if (to) periodFilter.lte = to;
+
     const entries = await prisma.kpiEntry.findMany({
-      where: scopedToOwnDept
-        ? { metric: { departmentId: req.employee.departmentId! } }
-        : undefined,
+      where: {
+        ...(scopedToOwnDept
+          ? { metric: { departmentId: req.employee.departmentId! } }
+          : {}),
+        ...(Object.keys(periodFilter).length ? { period: periodFilter } : {}),
+      },
       include: { metric: { include: { department: true } } },
     });
 
@@ -639,7 +682,6 @@ export async function getDepartmentBreakdown(req: Request, res: Response) {
           d.empPcts.size > 0 ? Math.round(sumOfEmpAvgs / d.empPcts.size) : 0;
 
         const metrics = Array.from(d.metrics.values()).map((m) => {
-          // Apply averaging for percentage metrics
           const isPct = m.name.includes("(%)");
           const finalTarget =
             isPct && m.count > 0 ? m.target / m.count : m.target;
@@ -707,7 +749,6 @@ export async function getEmployeeProgress(req: Request, res: Response) {
       let target = 0;
       let achieved = 0;
       for (const mg of metricGroups.values()) {
-        // Apply averaging for percentage metrics
         const isPct = mg.name.includes("(%)");
         target += isPct && mg.count > 0 ? mg.target / mg.count : mg.target;
         achieved +=

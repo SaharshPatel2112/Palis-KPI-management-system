@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { Link } from "react-router-dom";
 import {
   BarChart,
@@ -89,9 +89,6 @@ function BreakdownTooltip({ active, payload }: any) {
   );
 }
 
-// One chart per department. Achievement % is unit-agnostic, so Revenue (₹)
-// and order counts can share an axis safely; raw values live in the table
-// under each chart.
 function DepartmentChart({ dept }: { dept: DeptBreakdown }) {
   const data = dept.metrics.map((m) => ({ ...m, pct: m.achievementPercent }));
   const maxPct = Math.max(100, ...data.map((d) => d.pct + 10));
@@ -194,6 +191,18 @@ function DepartmentChart({ dept }: { dept: DeptBreakdown }) {
   );
 }
 
+// Global Date Constants
+const NOW = new Date();
+const CURRENT_YEAR = NOW.getFullYear().toString();
+const CURRENT_MONTH = String(NOW.getMonth() + 1).padStart(2, "0");
+const CURRENT_MONTH_NAME = NOW.toLocaleString("en-US", { month: "short" });
+const YEAR_OPTIONS = [
+  NOW.getFullYear() - 1,
+  NOW.getFullYear(),
+  NOW.getFullYear() + 1,
+  NOW.getFullYear() + 2,
+];
+
 export default function Dashboard() {
   const { employee, loading: meLoading } = useEmployee();
   const [summary, setSummary] = useState<DeptSummary[]>([]);
@@ -201,23 +210,79 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
+  // Custom Filters
+  const [selectedYear, setSelectedYear] = useState(CURRENT_YEAR);
+  const [selectedPeriod, setSelectedPeriod] = useState(CURRENT_MONTH);
+
   useEffect(() => {
+    let cancelled = false;
     async function load() {
+      setLoading(true);
+
+      const getParams = () => {
+        if (selectedYear === "all") return {};
+        if (selectedPeriod === "year") {
+          if (selectedYear === CURRENT_YEAR) {
+            // "This year" means January to Current Month
+            const lastDay = new Date(
+              NOW.getFullYear(),
+              NOW.getMonth() + 1,
+              0,
+            ).getDate();
+            return {
+              from: `${selectedYear}-01-01`,
+              to: `${selectedYear}-${CURRENT_MONTH}-${lastDay}`,
+            };
+          } else {
+            return { period: selectedYear };
+          }
+        }
+        if (selectedPeriod.startsWith("q")) {
+          const q = selectedPeriod.charAt(1);
+          const from = `${selectedYear}-${q === "1" ? "01" : q === "2" ? "04" : q === "3" ? "07" : "10"}-01`;
+          const to = `${selectedYear}-${q === "1" ? "03-31" : q === "2" ? "06-30" : q === "3" ? "09-30" : "12-31"}`;
+          return { from, to };
+        }
+        return { period: `${selectedYear}-${selectedPeriod}` };
+      };
+
       try {
+        const params = getParams();
         const [sumRes, brkRes] = await Promise.all([
-          client.get<DeptSummary[]>("/kpi/dashboard-summary"),
-          client.get<DeptBreakdown[]>("/kpi/department-breakdown"),
+          client.get<DeptSummary[]>("/kpi/dashboard-summary", { params }),
+          client.get<DeptBreakdown[]>("/kpi/department-breakdown", { params }),
         ]);
+
+        if (cancelled) return;
+
+        // No Data Alert Logic
+        if (brkRes.data.length === 0) {
+          if (
+            selectedYear !== CURRENT_YEAR ||
+            selectedPeriod !== CURRENT_MONTH
+          ) {
+            setTimeout(() => {
+              alert("There is no data for this option.");
+              setSelectedYear(CURRENT_YEAR);
+              setSelectedPeriod(CURRENT_MONTH);
+            }, 10);
+            return;
+          }
+        }
+
         setSummary(sumRes.data);
         setBreakdown(brkRes.data);
       } catch {
-        setError("Could not load dashboard data");
+        if (!cancelled) setError("Could not load dashboard data");
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     }
     if (employee) load();
-  }, [employee]);
+    return () => {
+      cancelled = true;
+    };
+  }, [employee, selectedYear, selectedPeriod]);
 
   const canManage =
     !!employee && ["ADMIN", "HR", "MANAGER"].includes(employee.role);
@@ -228,7 +293,7 @@ export default function Dashboard() {
     <div className="min-h-screen bg-white">
       <AppHeader />
       <div className="p-8">
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center justify-between mb-6 flex-wrap gap-4">
           <div className="flex items-center gap-3">
             <Link
               to="/"
@@ -237,7 +302,53 @@ export default function Dashboard() {
               <ArrowLeft size={24} />
             </Link>
             <h1 className="text-2xl font-semibold text-ink">Dashboard</h1>
+
+            <div className="flex gap-2 ml-2 sm:ml-4">
+              <select
+                value={selectedYear}
+                onChange={(e) => setSelectedYear(e.target.value)}
+                className="border border-line rounded-md px-3 py-1.5 text-sm bg-white text-ink focus:outline-none focus:border-primary shadow-sm cursor-pointer"
+              >
+                <option value="all">All Time</option>
+                {YEAR_OPTIONS.map((y) => (
+                  <option key={y} value={y}>
+                    {y}
+                  </option>
+                ))}
+              </select>
+
+              {selectedYear !== "all" && (
+                <select
+                  value={selectedPeriod}
+                  onChange={(e) => setSelectedPeriod(e.target.value)}
+                  className="border border-line rounded-md px-3 py-1.5 text-sm bg-white text-ink focus:outline-none focus:border-primary shadow-sm cursor-pointer"
+                >
+                  <option value="year">Current Year ({selectedYear})</option>
+                  <optgroup label="Quarters">
+                    <option value="q1">Q1 (Jan - Mar)</option>
+                    <option value="q2">Q2 (Apr - Jun)</option>
+                    <option value="q3">Q3 (Jul - Sep)</option>
+                    <option value="q4">Q4 (Oct - Dec)</option>
+                  </optgroup>
+                  <optgroup label="Months">
+                    <option value="01">January</option>
+                    <option value="02">February</option>
+                    <option value="03">March</option>
+                    <option value="04">April</option>
+                    <option value="05">May</option>
+                    <option value="06">June</option>
+                    <option value="07">July</option>
+                    <option value="08">August</option>
+                    <option value="09">September</option>
+                    <option value="10">October</option>
+                    <option value="11">November</option>
+                    <option value="12">December</option>
+                  </optgroup>
+                </select>
+              )}
+            </div>
           </div>
+
           <div className="flex items-center gap-5">
             {employee?.role !== "ADMIN" && (
               <Link
@@ -282,10 +393,11 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {(loading || meLoading) && <p className="text-muted">Loading...</p>}
-        {error && <p className="text-bad">{error}</p>}
-
-        {!loading && !meLoading && !error && (
+        {(loading && summary.length === 0) || meLoading ? (
+          <p className="text-muted">Loading...</p>
+        ) : error ? (
+          <p className="text-bad">{error}</p>
+        ) : (
           <>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-10">
               {summary.map((s) => (
@@ -304,8 +416,7 @@ export default function Dashboard() {
 
             {breakdown.length === 0 ? (
               <p className="text-muted text-sm">
-                No KPI entries yet — log some numbers or upload a CSV to see
-                charts here.
+                No KPI entries found for this time period.
               </p>
             ) : (
               <div className="grid md:grid-cols-2 gap-5">
