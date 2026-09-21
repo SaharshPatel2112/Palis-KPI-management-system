@@ -60,7 +60,7 @@ export default function App() {
         element={
           <>
             <SignedIn>
-              <Navigate to="/dashboard" replace />
+              <Navigate to="/" replace />
             </SignedIn>
             <SignedOut>
               <SignInPage />
@@ -73,7 +73,7 @@ export default function App() {
         element={
           <>
             <SignedIn>
-              <Navigate to="/dashboard" replace />
+              <Navigate to="/" replace />
             </SignedIn>
             <SignedOut>
               <SignUpPage />
