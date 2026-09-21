@@ -268,10 +268,8 @@ export default function Home() {
   const [selectedPeriod, setSelectedPeriod] = useState(CURRENT_MONTH);
 
   useEffect(() => {
-    // 1. Wait until Clerk has verified authentication status
     if (!isLoaded) return;
 
-    // 2. If visitor is signed out, don't trigger API calls
     if (!isSignedIn) {
       setIsFetching(false);
       setLive(null);
@@ -282,7 +280,6 @@ export default function Home() {
     setIsFetching(true);
 
     const getParams = () => {
-      // all=true ensures company-wide data like admin on the homepage
       const base: Record<string, string> = { all: "true" };
       if (selectedYear === "all") return base;
       if (selectedPeriod === "year") {
@@ -1171,8 +1168,8 @@ export default function Home() {
       {/* FOOTER */}
       <footer className="bg-ink text-white/70 pt-14 pb-7">
         <div className="max-w-6xl mx-auto px-6 md:px-8">
-          <div className="grid md:grid-cols-[1.4fr_1fr_1fr] gap-10 pb-9 border-b border-white/[0.12]">
-            <div>
+          <div className="flex flex-col md:flex-row flex-wrap gap-10 md:gap-12 lg:gap-16 pb-9 border-b border-white/[0.12]">
+            <div className="flex-[2] min-w-[260px]">
               <div className="flex items-center gap-3 mb-3.5">
                 <div className="bg-white rounded-lg px-2.5 py-1.5">
                   <span className="font-bold text-deep text-sm">P</span>
@@ -1186,53 +1183,80 @@ export default function Home() {
                 Vehicles.
               </p>
             </div>
-            <div>
+
+            <div className="flex-1 min-w-[120px]">
               <h5 className="text-white text-[13px] font-semibold tracking-wide mb-4">
                 Platform
               </h5>
               <div className="flex flex-col">
                 <a
                   href="#departments"
-                  className="text-[13.5px] text-white/65 hover:text-white py-1.5"
+                  className="text-[13.5px] text-white/65 hover:text-white py-1.5 transition-colors"
                 >
                   Departments
                 </a>
                 <a
                   href="#analytics"
-                  className="text-[13.5px] text-white/65 hover:text-white py-1.5"
+                  className="text-[13.5px] text-white/65 hover:text-white py-1.5 transition-colors"
                 >
                   Analytics
                 </a>
+                <a
+                  href="#how-it-works"
+                  className="text-[13.5px] text-white/65 hover:text-white py-1.5 transition-colors"
+                >
+                  How it works
+                </a>
                 <Link
                   to="/dashboard"
-                  className="text-[13.5px] text-white/65 hover:text-white py-1.5"
+                  className="text-[13.5px] text-white/65 hover:text-white py-1.5 transition-colors"
                 >
                   Dashboard
                 </Link>
               </div>
             </div>
-            <div>
+
+            <div className="flex-1 min-w-[120px]">
               <h5 className="text-white text-[13px] font-semibold tracking-wide mb-4">
-                Account
+                Details
               </h5>
               <div className="flex flex-col">
-                <Link
-                  to="/sign-in"
-                  className="text-[13.5px] text-white/65 hover:text-white py-1.5"
-                >
-                  Login
-                </Link>
-                <Link
-                  to="/sign-up"
-                  className="text-[13.5px] text-white/65 hover:text-white py-1.5"
-                >
-                  Sign up
-                </Link>
+                <span className="text-[13.5px] text-white/65 py-1.5">
+                  About
+                </span>
+                <span className="text-[13.5px] text-white/65 py-1.5">
+                  Contact
+                </span>
               </div>
             </div>
+
+            <SignedOut>
+              <div className="flex-1 min-w-[120px]">
+                <h5 className="text-white text-[13px] font-semibold tracking-wide mb-4">
+                  Account
+                </h5>
+                <div className="flex flex-col">
+                  <Link
+                    to="/sign-in"
+                    className="text-[13.5px] text-white/65 hover:text-white py-1.5 transition-colors"
+                  >
+                    Login
+                  </Link>
+                  <Link
+                    to="/sign-up"
+                    className="text-[13.5px] text-white/65 hover:text-white py-1.5 transition-colors"
+                  >
+                    Sign up
+                  </Link>
+                </div>
+              </div>
+            </SignedOut>
           </div>
+
           <div className="flex flex-wrap justify-between items-center pt-6 text-xs text-white/45 gap-2.5">
-            <span>© 2026 PALIS Eco Vehicles. All rights reserved.</span>
+            <span>
+              © {CURRENT_YEAR} PALIS Eco Vehicles. All rights reserved.
+            </span>
             <span>Internal use only</span>
           </div>
         </div>
