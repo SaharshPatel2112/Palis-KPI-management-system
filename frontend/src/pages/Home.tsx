@@ -476,17 +476,14 @@ export default function Home() {
       {/* NAV */}
       <header className="sticky top-0 z-50 bg-white/90 backdrop-blur border-b border-line">
         <div className="px-16 h-[76px] flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="bg-primary rounded-lg px-2.5 py-1.5">
-              <span className="font-bold text-white text-sm">P</span>
-            </div>
-            <div className="leading-tight">
-              <p className="font-bold text-[15px] text-ink">
-                PALIS KPI Management
-              </p>
-              <p className="font-mono text-[11px] tracking-wider text-muted">
-                PALIS ECO VEHICLES
-              </p>
+          <div className="flex items-center gap-1 shrink-0">
+            <img
+              src="/logo.png"
+              alt="PALIS Eco Vehicles"
+              className="h-14 md:h-15 object-contain"
+            />
+            <div className="leading-tight border-l border-line pl-2 ml-1 hidden sm:block">
+              <p className="font-medium text-[18px] text-ink">KPI Management</p>
             </div>
           </div>
           <nav className="hidden md:flex items-center gap-1 text-[14.5px] font-medium">
@@ -1170,13 +1167,17 @@ export default function Home() {
         <div className="max-w-6xl mx-auto px-6 md:px-8">
           <div className="flex flex-col md:flex-row flex-wrap gap-10 md:gap-12 lg:gap-16 pb-9 border-b border-white/[0.12]">
             <div className="flex-[2] min-w-[260px]">
-              <div className="flex items-center gap-3 mb-3.5">
-                <div className="bg-white rounded-lg px-2.5 py-1.5">
-                  <span className="font-bold text-deep text-sm">P</span>
+              <div className="flex items-center gap-1 mb-4 shrink-0">
+                <img
+                  src="/logo.png"
+                  alt="PALIS Eco Vehicles"
+                  className="h-14 md:h-15 object-contain"
+                />
+                <div className="leading-tight border-l border-white/20 pl-2 ml-1">
+                  <span className="font-medium text-[18px] text-white block">
+                    KPI Management
+                  </span>
                 </div>
-                <span className="text-white font-semibold text-[15px]">
-                  PALIS KPI Management System
-                </span>
               </div>
               <p className="text-[13.5px] text-white/55 max-w-xs leading-relaxed">
                 Performance &amp; productivity management platform for PALIS Eco

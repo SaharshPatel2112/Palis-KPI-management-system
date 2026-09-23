@@ -292,7 +292,7 @@ export default function Dashboard() {
   return (
     <div className="min-h-screen bg-white">
       <AppHeader />
-      <div className="p-8">
+      <div className="md:px-8 py-4">
         <div className="flex items-center justify-between mb-6 flex-wrap gap-4">
           <div className="flex items-center gap-3">
             <Link
