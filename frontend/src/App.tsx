@@ -15,6 +15,7 @@ import UsersKpisPage from "./pages/UsersKpisPage";
 import EmployeeKpiDetailPage from "./pages/EmployeeKpiDetailPage";
 import ReportsPage from "./pages/ReportsPage";
 import MyKpisPage from "./pages/MyKpisPage";
+import ProgressPage from "./pages/ProgressPage";
 import SignInPage from "./pages/SignInPage";
 import SignUpPage from "./pages/SignUpPage";
 import { attachAuthToken } from "./api/client";
@@ -126,6 +127,14 @@ export default function App() {
         element={
           <Protected>
             <UsersKpisPage />
+          </Protected>
+        }
+      />
+      <Route
+        path="/progress"
+        element={
+          <Protected>
+            <ProgressPage />
           </Protected>
         }
       />

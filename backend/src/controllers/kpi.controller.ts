@@ -15,6 +15,270 @@ const upsertKpiEntrySchema = z.object({
   remarks: z.string().max(500).optional(),
 });
 
+/**
+ * Helper function to calculate summarized KPI performance metrics
+ * for a specific period (monthly, yearly, etc.) and optional department scope.
+ */
+async function fetchSummaryForPeriod(period: string, scopedDeptId?: number) {
+  const [allDepartments, entries] = await Promise.all([
+    prisma.department.findMany({ orderBy: { id: "asc" } }),
+    prisma.kpiEntry.findMany({
+      where: {
+        ...(scopedDeptId ? { metric: { departmentId: scopedDeptId } } : {}),
+        period: { startsWith: period },
+      },
+      include: { metric: { include: { department: true } } },
+    }),
+  ]);
+
+  const targetDeptIds = scopedDeptId
+    ? [scopedDeptId]
+    : allDepartments.map((d) => d.id);
+
+  const summary = new Map<
+    string,
+    {
+      empPcts: Map<number, number[]>;
+      metricTotals: Map<
+        number,
+        { name: string; target: number; achieved: number; count: number }
+      >;
+    }
+  >();
+
+  for (const dept of allDepartments) {
+    if (targetDeptIds.includes(dept.id)) {
+      summary.set(dept.name, { empPcts: new Map(), metricTotals: new Map() });
+    }
+  }
+
+  for (const entry of entries) {
+    const deptName = entry.metric.department.name;
+    let current = summary.get(deptName);
+    if (!current) {
+      current = { empPcts: new Map(), metricTotals: new Map() };
+      summary.set(deptName, current);
+    }
+
+    let mTotal = current.metricTotals.get(entry.metricId);
+    if (!mTotal) {
+      mTotal = { name: entry.metric.name, target: 0, achieved: 0, count: 0 };
+      current.metricTotals.set(entry.metricId, mTotal);
+    }
+    mTotal.target += entry.target;
+    mTotal.achieved += entry.achieved;
+    mTotal.count += 1;
+
+    const p = entry.target > 0 ? (entry.achieved / entry.target) * 100 : 0;
+    let empList = current.empPcts.get(entry.employeeId);
+    if (!empList) {
+      empList = [];
+      current.empPcts.set(entry.employeeId, empList);
+    }
+    empList.push(p);
+  }
+
+  const deptResults = Array.from(summary.entries()).map(
+    ([department, data]) => {
+      let sumOfEmpAvgs = 0;
+      for (const pcts of data.empPcts.values()) {
+        sumOfEmpAvgs += pcts.reduce((a, b) => a + b, 0) / pcts.length;
+      }
+      const achievementPercent =
+        data.empPcts.size > 0
+          ? Math.round(sumOfEmpAvgs / data.empPcts.size)
+          : 0;
+
+      let adjustedTarget = 0;
+      let adjustedAchieved = 0;
+
+      const metrics = Array.from(data.metricTotals.values()).map((m) => {
+        const isPct = m.name.includes("(%)");
+        const t = isPct && m.count > 0 ? m.target / m.count : m.target;
+        const a = isPct && m.count > 0 ? m.achieved / m.count : m.achieved;
+        adjustedTarget += t;
+        adjustedAchieved += a;
+
+        return {
+          name: m.name,
+          target: Number(t.toFixed(2)),
+          achieved: Number(a.toFixed(2)),
+          achievementPercent: t > 0 ? Math.round((a / t) * 100) : 0,
+        };
+      });
+
+      return {
+        department,
+        target: Number(adjustedTarget.toFixed(2)),
+        achieved: Number(adjustedAchieved.toFixed(2)),
+        achievementPercent,
+        metrics,
+      };
+    },
+  );
+
+  const overallTarget = deptResults.reduce((acc, d) => acc + d.target, 0);
+  const overallAchieved = deptResults.reduce((acc, d) => acc + d.achieved, 0);
+  const overallAchievementPercent =
+    overallTarget > 0 ? Math.round((overallAchieved / overallTarget) * 100) : 0;
+
+  return {
+    departments: deptResults,
+    overall: {
+      target: Number(overallTarget.toFixed(2)),
+      achieved: Number(overallAchieved.toFixed(2)),
+      achievementPercent: overallAchievementPercent,
+    },
+  };
+}
+
+export async function getProgressData(req: Request, res: Response) {
+  try {
+    if (!req.employee)
+      return res.status(403).json({ message: "No employee profile" });
+
+    const { basePeriod, comparePeriod, all } = req.query as {
+      basePeriod?: string;
+      comparePeriod?: string;
+      all?: string;
+    };
+
+    if (!basePeriod || !comparePeriod) {
+      return res
+        .status(400)
+        .json({ message: "basePeriod and comparePeriod are required" });
+    }
+
+    const isCompanyWide =
+      all === "true" ||
+      req.employee.role === "ADMIN" ||
+      req.employee.role === "HR";
+    const scopedDeptId = !isCompanyWide
+      ? (req.employee.departmentId ?? undefined)
+      : undefined;
+
+    const [baseData, compareData] = await Promise.all([
+      fetchSummaryForPeriod(basePeriod, scopedDeptId),
+      fetchSummaryForPeriod(comparePeriod, scopedDeptId),
+    ]);
+
+    const overallDelta =
+      compareData.overall.achievementPercent -
+      baseData.overall.achievementPercent;
+
+    const deptMap = new Map<string, any>();
+    for (const d of baseData.departments) {
+      deptMap.set(d.department, {
+        department: d.department,
+        base: d,
+        compare: null,
+      });
+    }
+    for (const d of compareData.departments) {
+      const existing = deptMap.get(d.department);
+      if (existing) {
+        existing.compare = d;
+      } else {
+        deptMap.set(d.department, {
+          department: d.department,
+          base: {
+            department: d.department,
+            target: 0,
+            achieved: 0,
+            achievementPercent: 0,
+            metrics: [],
+          },
+          compare: d,
+        });
+      }
+    }
+
+    const departments = Array.from(deptMap.values()).map((entry) => {
+      const base = entry.base || {
+        target: 0,
+        achieved: 0,
+        achievementPercent: 0,
+        metrics: [],
+      };
+      const compare = entry.compare || {
+        target: 0,
+        achieved: 0,
+        achievementPercent: 0,
+        metrics: [],
+      };
+      const delta = compare.achievementPercent - base.achievementPercent;
+
+      const metricMap = new Map<string, any>();
+      for (const m of base.metrics || []) {
+        metricMap.set(m.name, { name: m.name, base: m, compare: null });
+      }
+      for (const m of compare.metrics || []) {
+        if (metricMap.has(m.name)) {
+          metricMap.get(m.name)!.compare = m;
+        } else {
+          metricMap.set(m.name, {
+            name: m.name,
+            base: { target: 0, achieved: 0, achievementPercent: 0 },
+            compare: m,
+          });
+        }
+      }
+
+      const mergedMetrics = Array.from(metricMap.values()).map((m) => {
+        const b = m.base || { target: 0, achieved: 0, achievementPercent: 0 };
+        const c = m.compare || {
+          target: 0,
+          achieved: 0,
+          achievementPercent: 0,
+        };
+        return {
+          name: m.name,
+          base: b,
+          compare: c,
+          delta: c.achievementPercent - b.achievementPercent,
+        };
+      });
+
+      return {
+        department: entry.department,
+        base: {
+          target: base.target,
+          achieved: base.achieved,
+          achievementPercent: base.achievementPercent,
+        },
+        compare: {
+          target: compare.target,
+          achieved: compare.achieved,
+          achievementPercent: compare.achievementPercent,
+        },
+        delta,
+        status: delta > 0 ? "increase" : delta < 0 ? "decrease" : "same",
+        metrics: mergedMetrics,
+      };
+    });
+
+    res.json({
+      basePeriod,
+      comparePeriod,
+      overall: {
+        base: baseData.overall,
+        compare: compareData.overall,
+        delta: overallDelta,
+        status:
+          overallDelta > 0
+            ? "increase"
+            : overallDelta < 0
+              ? "decrease"
+              : "same",
+      },
+      departments,
+    });
+  } catch (err) {
+    console.error("getProgressData error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+}
+
 export async function getDashboardSummary(req: Request, res: Response) {
   try {
     if (!req.employee)
@@ -321,11 +585,9 @@ export async function uploadKpiCsv(req: Request, res: Response) {
     ];
     const missing = required.filter((r) => col(r) === -1);
     if (missing.length > 0) {
-      return res
-        .status(400)
-        .json({
-          message: `CSV is missing required column(s): ${missing.join(", ")}`,
-        });
+      return res.status(400).json({
+        message: `CSV is missing required column(s): ${missing.join(", ")}`,
+      });
     }
     const remarksCol = col("remarks");
 
