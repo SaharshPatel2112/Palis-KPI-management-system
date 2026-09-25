@@ -374,6 +374,14 @@ export default function Dashboard() {
                 Upload CSV
               </Link>
             )}
+            {employee && ["ADMIN", "MANAGER", "HR"].includes(employee.role) && (
+              <Link
+                to="/progress"
+                className="text-sm font-semibold text-primary hover:text-deep transition-colors"
+              >
+                Progress
+              </Link>
+            )}
             {canManage && (
               <Link
                 to="/reports"
@@ -392,7 +400,6 @@ export default function Dashboard() {
             )}
           </div>
         </div>
-
         {(loading && summary.length === 0) || meLoading ? (
           <p className="text-muted">Loading...</p>
         ) : error ? (

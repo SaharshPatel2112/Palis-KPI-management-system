@@ -1,5 +1,7 @@
 import { Router } from "express";
 import { requireRole } from "../middleware/requireRole.js";
+import { getProgressData } from "../controllers/kpi.controller.js";
+
 import {
   getDashboardSummary,
   getMyKpis,
@@ -24,7 +26,7 @@ router.get(
 router.get("/my-kpis", requireRole(), getMyKpis);
 router.get("/entries", requireRole("ADMIN", "HR", "MANAGER"), listKpiEntries);
 router.get("/departments", requireRole(), listDepartments);
-// CSV upload is the only write path for KPI data.
+router.get("/progress", requireRole("ADMIN", "HR", "MANAGER"), getProgressData);
 router.post("/upload-csv", requireRole("ADMIN"), uploadKpiCsv);
 
 export default router;
